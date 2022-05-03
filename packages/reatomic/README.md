@@ -27,7 +27,7 @@ yarn add reatomic
 
 ## Live Demo
 
-https://codesandbox.io/s/reatomic-demo-forked-ydpm9r?file=/src/App.tsx
+https://codesandbox.io/s/reatomic-demo-forked-ydpm9r
 
 ## Comparison
 
@@ -105,7 +105,7 @@ hello.data = "Hi";
 console.log(greeting.data); // Hi Bill
 ```
 
-### Using read() to handle data caching and asynchronous data
+### Using use() to handle data caching and asynchronous data
 
 ```js
 function loadUserProfile(token) {
@@ -115,13 +115,13 @@ function loadUserProfile(token) {
 const accessToken = atom(localStorage.getItem("token"));
 const userProfile = atom(() => {
   if (!accessToken.data) return { username: "anonymous" };
-  const userProfileJson = read(
-    // this read has one dependencies: accessToken.data
+  const userProfileJson = use(
+    // this use has one dependencies: accessToken.data
     // once accessToken.data changed, the factory function will be called
     [accessToken.data],
     // the dependencies will be passed to factory as arguments
-    // the factory function can return a promise object and read function will handle that and return resolved value of the promise object
-    // when read() is waiting for the promise object, userProfile atom has loading status (userProfile.loading === true)
+    // the factory function can return a promise object and use function will handle that and return resolved value of the promise object
+    // when use() is waiting for the promise object, userProfile atom has loading status (userProfile.loading === true)
     // if the promise is rejected, userProfile atom will retrieve an error (userProfile.error)
     loadUserProfile
   );
@@ -138,12 +138,12 @@ accessToken.data = null;
 ### Working with async atom and Suspense
 
 ```jsx
-const user = atom((read) => {
-  // using read() to handle async data
+const user = atom((use) => {
+  // using use() to handle async data
   // no await needed
-  // when read() receives promise object, it will throw that promise and the atom object will handle async progress
+  // when use() receives promise object, it will throw that promise and the atom object will handle async progress
   // when promise is resolved, the atom factory function will be called again to continue next steps
-  const result = read(async () => {
+  const result = use(async () => {
     // load async data
     const res = await fetch("https://jsonplaceholder.typicode.com/todos/1");
     const json = await res.json();

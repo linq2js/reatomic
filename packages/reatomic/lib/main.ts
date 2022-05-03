@@ -22,7 +22,7 @@ export type Mode =
  */
 export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
 
-export type ReadResult<T> = T extends Promise<infer R> ? R : T;
+export type EffectResult<T> = T extends Promise<infer R> ? R : T;
 
 export interface Options<T> {
   /**
@@ -85,16 +85,16 @@ interface InternalAtom<T = any> extends Atom<T> {
 }
 
 /**
- * A read function that handles data caching and asynchronous data
+ * A use function that handles data caching and asynchronous data
  */
-export interface ReadFunction {
+export interface UseFunction {
   /**
    * wait until given atom data is ready
    */
-  <T>(atom: Atom<T>): ReadResult<T>;
-  <T>(factory: () => T): ReadResult<T>;
-  <T, P extends any[]>(deps: P, factory: (...args: P) => T): ReadResult<T>;
-  <T>(deps: any[], factory: () => T): ReadResult<T>;
+  <T>(atom: Atom<T>): EffectResult<T>;
+  <T>(factory: () => T): EffectResult<T>;
+  <T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
+  <T>(deps: any[], factory: () => T): EffectResult<T>;
 }
 
 export interface Use<T> extends Function {
@@ -104,8 +104,12 @@ export interface Use<T> extends Function {
 
 type Cache = { value: any; error?: any; deps: any[] };
 
-const isFunc = (value: any): value is Function => typeof value === "function";
+export interface Context {
+  abortController: AbortController | undefined;
+}
 
+const isFunc = (value: any): value is Function => typeof value === "function";
+const isAbortControllerSupported = typeof AbortController !== "undefined";
 const isPromiseLike = (value: any): value is Promise<any> =>
   isFunc(value?.then);
 
@@ -116,7 +120,7 @@ const isPromiseLike = (value: any): value is Promise<any> =>
  * @returns
  */
 const create = <T = any>(
-  initial?: T | ((read: ReadFunction) => T),
+  initial?: T | ((use: UseFunction, context: Context) => T),
   options?: Options<T>
 ): Atom<T> => {
   const listeners = new Set<VoidFunction>();
@@ -131,6 +135,7 @@ const create = <T = any>(
   let tracking = 0;
   let atom: InternalAtom<T>;
   let externalUpdate: VoidFunction;
+  let lastAbortController: AbortController | undefined;
 
   const track = (refresh: VoidFunction | undefined, f: Function) => {
     const prevListener = currentListener;
@@ -146,7 +151,7 @@ const create = <T = any>(
 
   const notify = () => listeners.forEach((x) => x());
 
-  const read = (...args: any[]) => {
+  const use = (...args: any[]) => {
     if (args[0]?.listen && args[0]?.use) {
       const atom: Atom = args[0];
       if (atom.loading) throw (atom as any).$$promise;
@@ -206,17 +211,22 @@ const create = <T = any>(
       track(externalUpdate, () => {
         hookIndex = 0;
         try {
-          const result = factory(read);
+          lastAbortController?.abort();
+          if (isAbortControllerSupported) {
+            lastAbortController = new AbortController();
+          }
+          const context: Context = { abortController: lastAbortController };
+          const result = factory(use, context);
           if (isPromiseLike(result)) {
             throw new Error(
-              "The atom factory result cannot be promise object. Use read() to handle async data"
+              "The atom factory result cannot be promise object. Use use() to handle async data"
             );
           }
           if (result !== data) {
             data = result;
           }
         } catch (e) {
-          // handle promise object that is thrown by read()
+          // handle promise object that is thrown by use()
           if (isPromiseLike(e)) {
             loading = true;
             lastPromise = e;
