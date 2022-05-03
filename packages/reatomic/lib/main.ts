@@ -93,11 +93,10 @@ export interface Use<T> extends Function {
 
 type Cache = { value: any; error?: any; deps: any[] };
 
-const isFunction = (value: any): value is Function =>
-  typeof value === "function";
+const isFunc = (value: any): value is Function => typeof value === "function";
 
 const isPromiseLike = (value: any): value is Promise<any> =>
-  isFunction(value?.then);
+  isFunc(value?.then);
 
 /**
  * create an atom with specified initial data.
@@ -105,12 +104,12 @@ const isPromiseLike = (value: any): value is Promise<any> =>
  * @param initial
  * @returns
  */
-export default function create<T = any>(
+const create = <T = any>(
   initial?: T | ((read: ReadFunction) => T)
-): Atom<T> {
+): Atom<T> => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
-  const factory: Function | false = isFunction(initial) && initial;
+  const factory: Function | false = isFunc(initial) && initial;
   let data: any = factory ? undefined : initial;
   let hookIndex = 0;
   let changeToken = {};
@@ -121,7 +120,7 @@ export default function create<T = any>(
   let tracking = 0;
   let atom: InternalAtom<T>;
 
-  function track(refresh: VoidFunction | undefined, f: Function) {
+  const track = (refresh: VoidFunction | undefined, f: Function) => {
     const prevListener = currentListener;
     tracking++;
     try {
@@ -131,11 +130,11 @@ export default function create<T = any>(
       currentListener = prevListener;
       tracking--;
     }
-  }
+  };
 
   const notify = () => listeners.forEach((x) => x());
 
-  function read(...args: any[]) {
+  const read = (...args: any[]) => {
     if (args[0]?.listen && args[0]?.use) {
       const atom: Atom = args[0];
       if (atom.loading) throw (atom as any).$$promise;
@@ -144,7 +143,7 @@ export default function create<T = any>(
     }
     let deps: any[];
     let factory: Function;
-    if (isFunction(args[0])) {
+    if (isFunc(args[0])) {
       deps = [];
       [factory] = args;
     } else {
@@ -183,7 +182,7 @@ export default function create<T = any>(
     if (m.error) throw m.error;
     hookIndex++;
     return m.value;
-  }
+  };
 
   refresh = () => {
     const prevDependents = [...listeners];
@@ -245,7 +244,7 @@ export default function create<T = any>(
     const shouldUpdateRef = useRef<ShouldUpdateFn<T>>();
     let mode: Mode;
 
-    if (isFunction(args[0])) {
+    if (isFunc(args[0])) {
       mode = MODE_ALL;
       [shouldUpdateRef.current] = args;
     } else {
@@ -260,6 +259,7 @@ export default function create<T = any>(
       []
     );
     useEffect(() => {
+      activeRef.current = true;
       let [prevError, prevLoading, prevData] = [error, loading, data];
       return listen(() => {
         if (!activeRef.current) return;
@@ -280,9 +280,9 @@ export default function create<T = any>(
     return data;
   };
 
-  function set(value: T | ((prev: T) => T)) {
+  const set = (value: T | ((prev: T) => T)) => {
     try {
-      if (isFunction(value)) {
+      if (isFunc(value)) {
         const fn = value;
         // disable tracking
         value = track(undefined, () => fn(data));
@@ -298,13 +298,13 @@ export default function create<T = any>(
     data = value;
     refresh();
     return atom;
-  }
+  };
 
-  function addDependant() {
+  const addDependant = () => {
     if (!currentListener) return;
     if (tracking) throw new Error("Circular dependencies");
     listeners.add(currentListener);
-  }
+  };
 
   refresh();
 
@@ -349,4 +349,6 @@ export default function create<T = any>(
   };
 
   return atom;
-}
+};
+
+export default create;

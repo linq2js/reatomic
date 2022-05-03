@@ -153,14 +153,13 @@ const App = () => {
 
 ## Comparison
 
-| Name              | Bundle Size (GZipped) | Async Data | Store dependencies |
-| ----------------- | --------------------: | :--------: | :----------------: |
-| reatomic          |                    1K |     ✓      |         ✓          |
-| reatom            |                    2K |            |         ✓          |
-| redux             |                  1.6K |            |                    |
-| redux+react-redux |                  2.7K |            |                    |
-| rtk               |                   11K |            |                    |
-| mobx              |                   15K |            |         ✓          |
-| effector          |                   10k |            |                    |
-| nanostores        |                   <1K |            |         ✓          |
-| recoil            |                   22K |     ✓      |         ✓          |
+| Name                           | Bundle Size (GZipped) | Async Data | Store dependencies |
+| ------------------------------ | --------------------: | :--------: | :----------------: |
+| reatomic                       |                 1.03K |     ✓      |         ✓          |
+| nanostores + @nanostores/react |                  2.3K |            |         ✓          |
+| redux + react-redux            |                  2.7K |            |                    |
+| @reatom/core + @reatom/react   |                  3.1K |     ✓      |         ✓          |
+| rtk                            |                   11K |            |                    |
+| effector + effector-react      |                 12.1k |            |                    |
+| mobx + mobx-react-lite         |                 18.5K |            |         ✓          |
+| recoil                         |                   22K |     ✓      |         ✓          |
