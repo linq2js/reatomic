@@ -1,6 +1,6 @@
 {
   "name": "reatom",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Minimal React state management",
   "author": "linq2js <linqtojs@gmail.com>",
   "repository": {
