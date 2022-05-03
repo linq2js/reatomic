@@ -52,3 +52,18 @@ test("memo with atom", async () => {
   expect(token.error).toBe("invalid");
   expect(userProfile.error).toBe("invalid");
 });
+
+test("hydration", async () => {
+  let dehydratedData = 1;
+  const counter = atom(() => 0, {
+    hydrate: () => [true, dehydratedData],
+    dehydrate: (data) => (dehydratedData = data),
+  });
+  expect(counter.data).toBe(1);
+  counter.data++;
+  expect(counter.data).toBe(2);
+  expect(dehydratedData).toBe(2);
+  counter.reset();
+  expect(counter.data).toBe(0);
+  expect(dehydratedData).toBe(0);
+});

@@ -24,6 +24,17 @@ export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
 
 export type ReadResult<T> = T extends Promise<infer R> ? R : T;
 
+export interface Options<T> {
+  /**
+   * hydrate data from external source (SSR/localStorage)
+   */
+  hydrate?: () => [true, T] | [false, undefined];
+  /**
+   * dehydrate callback will be called whenever data changed
+   */
+  dehydrate?: (data: T) => void;
+}
+
 export interface Atom<T = any> {
   readonly loading: boolean;
   /**
@@ -105,7 +116,8 @@ const isPromiseLike = (value: any): value is Promise<any> =>
  * @returns
  */
 const create = <T = any>(
-  initial?: T | ((read: ReadFunction) => T)
+  initial?: T | ((read: ReadFunction) => T),
+  options?: Options<T>
 ): Atom<T> => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
@@ -282,7 +294,7 @@ const create = <T = any>(
     return data;
   };
 
-  const set = (value: T | ((prev: T) => T)) => {
+  const set = (value: T | ((prev: T) => T), hydrating = false) => {
     try {
       if (isFunc(value)) {
         const fn = value;
@@ -298,6 +310,7 @@ const create = <T = any>(
     if (value === data) return atom;
     changeToken = {};
     data = value;
+    !hydrating && options?.dehydrate?.(data);
     update(true);
     return atom;
   };
@@ -308,7 +321,16 @@ const create = <T = any>(
     listeners.add(currentListener);
   };
 
-  externalUpdate();
+  if (options?.hydrate) {
+    const [ok, dehydratedData] = options.hydrate();
+    if (ok) {
+      set(dehydratedData, true);
+    } else {
+      externalUpdate();
+    }
+  } else {
+    externalUpdate();
+  }
 
   atom = {
     get loading() {
@@ -341,6 +363,7 @@ const create = <T = any>(
     reset() {
       if (factory) {
         externalUpdate();
+        options?.dehydrate?.(data);
       } else {
         set(initial as T);
       }

@@ -16,9 +16,31 @@ npm i reatomic --save
 yarn add reatomic
 ```
 
+## Features
+
+1. Tiny size: ~1K GZipped
+2. Extreme fast
+3. Fully Typescript supported
+4. Asynchronous data supported
+5. State dependencies supported
+6. Suspense & Error Boundary supported
+
 ## Live Demo
 
 https://codesandbox.io/s/reatomic-demo-forked-ydpm9r?file=/src/App.tsx
+
+## Comparison
+
+| Name                           | Bundle Size (GZipped) | Async Data | State dependencies | Suspense | Error Boundary |
+| ------------------------------ | --------------------: | :--------: | :----------------: | :------: | :------------: |
+| reatomic                       |                   ~1K |     ✓      |         ✓          |    ✓     |       ✓        |
+| nanostores + @nanostores/react |                  2.3K |            |         ✓          |          |                |
+| redux + react-redux            |                  2.7K |            |                    |          |                |
+| @reatom/core + @reatom/react   |                  3.1K |     ✓      |         ✓          |          |                |
+| rtk                            |                   11K |            |                    |          |                |
+| effector + effector-react      |                 12.1k |            |                    |          |                |
+| mobx + mobx-react-lite         |                 18.5K |            |         ✓          |          |                |
+| recoil                         |                   22K |     ✓      |         ✓          |          |                |
 
 ## Usages
 
@@ -154,16 +176,3 @@ const App = () => {
   );
 };
 ```
-
-## Comparison
-
-| Name                           | Bundle Size (GZipped) | Async Data | Store dependencies |
-| ------------------------------ | --------------------: | :--------: | :----------------: |
-| reatomic                       |                 1.03K |     ✓      |         ✓          |
-| nanostores + @nanostores/react |                  2.3K |            |         ✓          |
-| redux + react-redux            |                  2.7K |            |                    |
-| @reatom/core + @reatom/react   |                  3.1K |     ✓      |         ✓          |
-| rtk                            |                   11K |            |                    |
-| effector + effector-react      |                 12.1k |            |                    |
-| mobx + mobx-react-lite         |                 18.5K |            |         ✓          |
-| recoil                         |                   22K |     ✓      |         ✓          |
