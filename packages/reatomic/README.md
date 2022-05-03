@@ -1,18 +1,18 @@
-# `reatom`
+# `reatomic`
 
 ## Installation
 
 **with NPM**
 
 ```bash
-npm i reatom --save
+npm i reatomic --save
 ``
 ```
 
 **with YARN**
 
 ```bash
-yarn add reatom
+yarn add reatomic
 ``
 ```
 
@@ -21,7 +21,7 @@ yarn add reatom
 ### Simple atom
 
 ```jsx
-import atom from "reatom";
+import atom from "reatomic";
 
 // creating atom with initial data
 const counter = atom(0);
@@ -35,7 +35,7 @@ console.log(counter.data); // 1
 ### Binding atom with react component
 
 ```jsx
-import atom from "reatom";
+import atom from "reatomic";
 
 const counter = atom(0);
 
@@ -58,7 +58,7 @@ const App = () => {
 A minimal version of Counter App
 
 ```jsx
-import atom from "reatom";
+import atom from "reatomic";
 
 const counter = atom(0);
 const App = () => <h1 onClick={() => counter.data++}>{counter.use()}</h1>;

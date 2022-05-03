@@ -1,12 +1,12 @@
 {
-  "name": "reatom",
+  "name": "reatomic",
   "version": "0.0.1",
   "description": "Minimal React state management",
   "author": "linq2js <linqtojs@gmail.com>",
   "repository": {
-    "url": "https://github.com/linq2js/reatom"
+    "url": "https://github.com/linq2js/reatomic"
   },
-  "homepage": "https://linq2js.github.io/reatom/",
+  "homepage": "https://linq2js.github.io/reatomic/",
   "license": "ISC",
   "main": "dist/main.js",
   "types": "dist/tsc/main.d.ts",
@@ -43,5 +43,6 @@
     "clean": "rm -rf dist build package",
     "ts-node": "ts-node",
     "build": "rimraf dist && tsc && rollup -c rollup.config.js && gzip-size ./dist/main.js"
-  }
+  },
+  "gitHead": "9c6f79491a82d98e4d2b2d49eef3df43484940d1"
 }

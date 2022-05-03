@@ -17,7 +17,7 @@ export type Mode =
   | typeof MODE_NONE;
 
 /**
- * Use this function to let reatom knows when the host component should update.
+ * Use this function to let reatomic knows when the host component should update.
  * Let say you have an atom with a lot of properties and you need the component when some of properties are changed, not at all
  */
 export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
