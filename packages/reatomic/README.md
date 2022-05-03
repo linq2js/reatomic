@@ -16,6 +16,10 @@ npm i reatomic --save
 yarn add reatomic
 ```
 
+## Live Demo
+
+https://codesandbox.io/s/reatomic-demo-forked-ydpm9r?file=/src/App.tsx
+
 ## Usages
 
 ### Simple atom
