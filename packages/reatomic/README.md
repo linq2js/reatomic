@@ -8,14 +8,12 @@ Minimal React state management
 
 ```bash
 npm i reatomic --save
-``
 ```
 
 **with YARN**
 
 ```bash
 yarn add reatomic
-``
 ```
 
 ## Usages
