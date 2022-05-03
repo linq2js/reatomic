@@ -26,12 +26,46 @@ export type ReadResult<T> = T extends Promise<infer R> ? R : T;
 
 export interface Atom<T = any> {
   readonly loading: boolean;
+  /**
+   * get data without tracking
+   * ```js
+   * const counter = atom(0);
+   * const doubleCounter = atom(() => {
+   *  // this is TRACKED data
+   *  // the doubleCounter atom will update when counter changed
+   *  return counter.data * 2;
+   * });
+   *
+   * const trippleCounter = atom(() => {
+   *  // this is UNTRACKED data
+   *  // the doubleCounter atom will NOT update when counter changed
+   *  return counter.untrackedData * 3;
+   * }
+   * ```
+   */
   readonly untrackedData: T;
+  /**
+   * get/set error of the atom
+   */
   error: any;
+  /**
+   * get current data of the atom
+   */
   data: T;
-  set(data: T | ((prev: T) => T)): this;
+  /**
+   * change the atom data
+   * @param input
+   */
+  set(input: T | ((prev: T) => T)): this;
   reset(): void;
+  /**
+   * bind the atom to the current react component
+   */
   use: Use<T>;
+  /**
+   * listen atom data change event
+   * @param listener
+   */
   listen(listener: VoidFunction): VoidFunction;
 }
 
@@ -79,7 +113,7 @@ export default function create<T = any>(
   const factory: Function | false = isFunction(initial) && initial;
   let data: any = factory ? undefined : initial;
   let hookIndex = 0;
-  // let changeToken = {};
+  let changeToken = {};
   let loading = false;
   let error: any;
   let refresh: VoidFunction;
@@ -175,7 +209,12 @@ export default function create<T = any>(
           if (isPromiseLike(e)) {
             loading = true;
             lastPromise = e;
-            e.finally(refresh);
+            const token = changeToken;
+            e.finally(() => {
+              // skip refresh if the data has been changed since last time
+              if (token !== changeToken) return;
+              refresh();
+            });
           } else {
             error = e;
           }
@@ -255,7 +294,7 @@ export default function create<T = any>(
     }
 
     if (value === data) return atom;
-    // changeToken = {};
+    changeToken = {};
     data = value;
     refresh();
     return atom;
