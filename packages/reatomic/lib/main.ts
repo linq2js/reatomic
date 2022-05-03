@@ -115,10 +115,10 @@ const create = <T = any>(
   let changeToken = {};
   let loading = false;
   let error: any;
-  let refresh: VoidFunction;
   let lastPromise: Promise<void> | undefined;
   let tracking = 0;
   let atom: InternalAtom<T>;
+  let externalUpdate: VoidFunction;
 
   const track = (refresh: VoidFunction | undefined, f: Function) => {
     const prevListener = currentListener;
@@ -184,14 +184,14 @@ const create = <T = any>(
     return m.value;
   };
 
-  refresh = () => {
+  const update = (internal: boolean) => {
     const prevDependents = [...listeners];
     loading = false;
     error = undefined;
     lastPromise = undefined;
     listeners.clear();
-    if (factory) {
-      track(refresh, () => {
+    if (!internal && factory) {
+      track(externalUpdate, () => {
         hookIndex = 0;
         try {
           const result = factory(read);
@@ -212,7 +212,7 @@ const create = <T = any>(
             e.finally(() => {
               // skip refresh if the data has been changed since last time
               if (token !== changeToken) return;
-              refresh();
+              update(internal);
             });
           } else {
             error = e;
@@ -222,6 +222,8 @@ const create = <T = any>(
     }
     prevDependents.forEach((x) => x());
   };
+
+  externalUpdate = () => update(false);
 
   const listen = (listener: VoidFunction) => {
     let active = true;
@@ -296,7 +298,7 @@ const create = <T = any>(
     if (value === data) return atom;
     changeToken = {};
     data = value;
-    refresh();
+    update(true);
     return atom;
   };
 
@@ -306,7 +308,7 @@ const create = <T = any>(
     listeners.add(currentListener);
   };
 
-  refresh();
+  externalUpdate();
 
   atom = {
     get loading() {
@@ -338,7 +340,7 @@ const create = <T = any>(
     listen,
     reset() {
       if (factory) {
-        refresh();
+        externalUpdate();
       } else {
         set(initial as T);
       }
