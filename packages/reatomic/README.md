@@ -162,5 +162,5 @@ const App = () => {
 | rtk               |                   11K |            |                    |
 | mobx              |                   15K |            |         ✓          |
 | effector          |                   10k |            |                    |
-| nanostores        |                   <1K |            |                    |
+| nanostores        |                   <1K |            |         ✓          |
 | recoil            |                   22K |     ✓      |         ✓          |
