@@ -1,5 +1,7 @@
 # `reatomic`
 
+Minimal React state management
+
 ## Installation
 
 **with NPM**
@@ -59,7 +61,6 @@ A minimal version of Counter App
 
 ```jsx
 import atom from "reatomic";
-
 const counter = atom(0);
 const App = () => <h1 onClick={() => counter.data++}>{counter.use()}</h1>;
 ```
@@ -80,7 +81,7 @@ hello.data = "Hi";
 console.log(greeting.data); // Hi Bill
 ```
 
-### Using memo() to handle data caching and asynchronous data
+### Using read() to handle data caching and asynchronous data
 
 ```js
 function loadUserProfile(token) {
@@ -90,13 +91,13 @@ function loadUserProfile(token) {
 const accessToken = atom(localStorage.getItem("token"));
 const userProfile = atom(() => {
   if (!accessToken.data) return { username: "anonymous" };
-  const userProfileJson = memo(
-    // this memo has one dependencies: accessToken.data
+  const userProfileJson = read(
+    // this read has one dependencies: accessToken.data
     // once accessToken.data changed, the factory function will be called
     [accessToken.data],
     // the dependencies will be passed to factory as arguments
-    // the factory function can return a promise object and memo function will handle that and return resolved value of the promise object
-    // when memo is waiting for the promise object, userProfile atom has loading status (userProfile.loading === true)
+    // the factory function can return a promise object and read function will handle that and return resolved value of the promise object
+    // when read() is waiting for the promise object, userProfile atom has loading status (userProfile.loading === true)
     // if the promise is rejected, userProfile atom will retrieve an error (userProfile.error)
     loadUserProfile
   );
@@ -110,4 +111,58 @@ accessToken.data = "the token which is received from authentication API";
 accessToken.data = null;
 ```
 
-### Asynchronous atom
+### Working with async atom and Suspense
+
+```jsx
+const user = atom((read) => {
+  // using read() to handle async data
+  // no await needed
+  // when read() receives promise object, it will throw that promise and the atom object will handle async progress
+  // when promise is resolved, the atom factory function will be called again to continue next steps
+  const result = read(async () => {
+    // load async data
+    const res = await fetch("https://jsonplaceholder.typicode.com/todos/1");
+    const json = await res.json();
+    return json;
+  });
+  return result;
+});
+
+const UserDetails = () => {
+  const userData = user.use();
+  return <div>{JSON.stringify(userData)}</div>;
+};
+
+const UserDetailsWithCustomSpinner = () => {
+  // passing "none" to disable Suspense and ErrorBoundary support
+  // so use() returns atom object
+  const { data, loading } = user.use("none");
+  if (loading) return "Loading...";
+  return <div>{JSON.stringify(data)}</div>;
+};
+
+const App = () => {
+  return (
+    <>
+      <Suspense fallback="Loading...">
+        <UserDetails />
+      </Suspense>
+      <UserDetailsWithCustomSpinner />
+    </>
+  );
+};
+```
+
+## Comparison
+
+| Name              | Bundle Size (GZipped) | Async Data | Store dependencies |
+| ----------------- | --------------------: | :--------: | :----------------: |
+| reatomic          |                    1K |     ✓      |         ✓          |
+| reatom            |                    2K |            |         ✓          |
+| redux             |                  1.6K |            |                    |
+| redux+react-redux |                  2.7K |            |                    |
+| rtk               |                   11K |            |                    |
+| mobx              |                   15K |            |         ✓          |
+| effector          |                   10k |            |                    |
+| nanostores        |                   <1K |            |                    |
+| recoil            |                   22K |     ✓      |         ✓          |

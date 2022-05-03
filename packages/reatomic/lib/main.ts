@@ -22,7 +22,7 @@ export type Mode =
  */
 export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
 
-export type MemoResult<T> = T extends Promise<infer R> ? R : T;
+export type ReadResult<T> = T extends Promise<infer R> ? R : T;
 
 export interface Atom<T = any> {
   readonly loading: boolean;
@@ -40,16 +40,16 @@ interface InternalAtom<T = any> extends Atom<T> {
 }
 
 /**
- * A memo function that handles data caching and asynchronous data
+ * A read function that handles data caching and asynchronous data
  */
-export interface MemoFunction {
+export interface ReadFunction {
   /**
    * wait until given atom data is ready
    */
-  <T>(atom: Atom<T>): MemoResult<T>;
-  <T>(factory: () => T): MemoResult<T>;
-  <T, P extends any[]>(deps: P, factory: (...args: P) => T): MemoResult<T>;
-  <T>(deps: any[], factory: () => T): MemoResult<T>;
+  <T>(atom: Atom<T>): ReadResult<T>;
+  <T>(factory: () => T): ReadResult<T>;
+  <T, P extends any[]>(deps: P, factory: (...args: P) => T): ReadResult<T>;
+  <T>(deps: any[], factory: () => T): ReadResult<T>;
 }
 
 export interface Use<T> extends Function {
@@ -72,13 +72,13 @@ const isPromiseLike = (value: any): value is Promise<any> =>
  * @returns
  */
 export default function create<T = any>(
-  initial?: T | ((memo: MemoFunction) => T)
+  initial?: T | ((read: ReadFunction) => T)
 ): Atom<T> {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
   const factory: Function | false = isFunction(initial) && initial;
   let data: any = factory ? undefined : initial;
-  let memoIndex = 0;
+  let hookIndex = 0;
   // let changeToken = {};
   let loading = false;
   let error: any;
@@ -101,7 +101,7 @@ export default function create<T = any>(
 
   const notify = () => listeners.forEach((x) => x());
 
-  function memo(...args: any[]) {
+  function read(...args: any[]) {
     if (args[0]?.listen && args[0]?.use) {
       const atom: Atom = args[0];
       if (atom.loading) throw (atom as any).$$promise;
@@ -117,7 +117,7 @@ export default function create<T = any>(
       [deps, factory] = args;
     }
 
-    let m = cache[memoIndex];
+    let m = cache[hookIndex];
     track(undefined, () => {
       const shouldUpdate =
         !m ||
@@ -126,7 +126,7 @@ export default function create<T = any>(
 
       if (shouldUpdate) {
         const value = factory(...deps);
-        cache[memoIndex] = m = { value, deps };
+        cache[hookIndex] = m = { value, deps };
         // handle async
         if (isPromiseLike(value)) {
           m.value = undefined;
@@ -147,7 +147,7 @@ export default function create<T = any>(
       }
     });
     if (m.error) throw m.error;
-    memoIndex++;
+    hookIndex++;
     return m.value;
   }
 
@@ -159,19 +159,19 @@ export default function create<T = any>(
     listeners.clear();
     if (factory) {
       track(refresh, () => {
-        memoIndex = 0;
+        hookIndex = 0;
         try {
-          const result = factory(memo);
+          const result = factory(read);
           if (isPromiseLike(result)) {
             throw new Error(
-              "The atom factory result cannot be promise object. Use memo() to handle async data"
+              "The atom factory result cannot be promise object. Use read() to handle async data"
             );
           }
           if (result !== data) {
             data = result;
           }
         } catch (e) {
-          // handle promise object that is thrown by memo
+          // handle promise object that is thrown by read()
           if (isPromiseLike(e)) {
             loading = true;
             lastPromise = e;
