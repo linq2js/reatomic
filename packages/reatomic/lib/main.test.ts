@@ -19,7 +19,7 @@ test("dynamic atom", () => {
 });
 
 test("async atom", async () => {
-  const users = atom((memo) => memo(() => delay(10, [1, 2, 3])));
+  const users = atom(({ use }) => use(() => delay(10, [1, 2, 3])));
   expect(users.loading).toBe(true);
   expect(users.data).toBeUndefined();
   await delay(20);
@@ -27,18 +27,18 @@ test("async atom", async () => {
   expect(users.data).toEqual([1, 2, 3]);
 });
 
-test("memo with atom", async () => {
+test("use with atom", async () => {
   const attempts = atom(1);
-  const token = atom((memo) => {
+  const token = atom(({ use }) => {
     const a = attempts.data;
-    return memo([a], () => {
+    return use([a], () => {
       if (a === 1) return Promise.resolve("valid");
       if (a === 2) return Promise.reject("invalid");
       return Promise.resolve("ok");
     });
   });
-  const userProfile = atom((memo) => {
-    const t = memo(token);
+  const userProfile = atom(({ use }) => {
+    const t = use(token);
     return { token: t };
   });
   expect(userProfile.loading).toBe(true);
@@ -53,17 +53,17 @@ test("memo with atom", async () => {
   expect(userProfile.error).toBe("invalid");
 });
 
-test("hydration", async () => {
-  let dehydratedData = 1;
+test("persist data", async () => {
+  let saved = 1;
   const counter = atom(() => 0, {
-    hydrate: () => [true, dehydratedData],
-    dehydrate: (data) => (dehydratedData = data),
+    load: () => ({ data: saved }),
+    save: (data) => (saved = data),
   });
   expect(counter.data).toBe(1);
   counter.data++;
   expect(counter.data).toBe(2);
-  expect(dehydratedData).toBe(2);
+  expect(saved).toBe(2);
   counter.reset();
   expect(counter.data).toBe(0);
-  expect(dehydratedData).toBe(0);
+  expect(saved).toBe(0);
 });

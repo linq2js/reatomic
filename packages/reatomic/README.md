@@ -138,7 +138,7 @@ accessToken.data = null;
 ### Working with async atom and Suspense
 
 ```jsx
-const user = atom((use) => {
+const user = atom(({ use }) => {
   // using use() to handle async data
   // no await needed
   // when use() receives promise object, it will throw that promise and the atom object will handle async progress

@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 
-let currentListener: VoidFunction | undefined;
-
 const MODE_ALL = "all";
-
 const MODE_SUSPENSE = "suspense";
-
 const MODE_ERROR_BOUNDARY = "errorBoundary";
-
 const MODE_NONE = "none";
+const ERROR_RESULT_IS_PROMISE_OBJECT = "The result cannot be promise object";
+
+export type UpdateFn<T> = (prev: T) => T;
 
 export type Mode =
   | typeof MODE_ALL
@@ -25,14 +23,8 @@ export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
 export type EffectResult<T> = T extends Promise<infer R> ? R : T;
 
 export interface Options<T> {
-  /**
-   * hydrate data from external source (SSR/localStorage)
-   */
-  hydrate?: () => [true, T] | [false, undefined];
-  /**
-   * dehydrate callback will be called whenever data changed
-   */
-  dehydrate?: (data: T) => void;
+  load?: () => { data: T } | undefined;
+  save?: (data: T) => void;
 }
 
 export interface Atom<T = any> {
@@ -63,16 +55,18 @@ export interface Atom<T = any> {
    * get current data of the atom
    */
   data: T;
+  set(...fn: UpdateFn<T>[]): this;
   /**
    * change the atom data
-   * @param input
+   * @param data
    */
-  set(input: T | ((prev: T) => T)): this;
+  set(data: T): this;
   reset(): void;
   /**
    * bind the atom to the current react component
    */
-  use: Use<T>;
+  use(mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
+  use(shouldUpdate: ShouldUpdateFn<T>): T;
   /**
    * listen atom data change event
    * @param listener
@@ -84,34 +78,102 @@ interface InternalAtom<T = any> extends Atom<T> {
   readonly $$promise: Promise<void> | undefined;
 }
 
-/**
- * A use function that handles data caching and asynchronous data
- */
-export interface UseFunction {
-  /**
-   * wait until given atom data is ready
-   */
-  <T>(atom: Atom<T>): EffectResult<T>;
-  <T>(factory: () => T): EffectResult<T>;
-  <T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
-  <T>(deps: any[], factory: () => T): EffectResult<T>;
-}
-
-export interface Use<T> extends Function {
-  (mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
-  (shouldUpdate: ShouldUpdateFn<T>): T;
-}
-
 type Cache = { value: any; error?: any; deps: any[] };
 
-export interface Context {
-  abortController: AbortController | undefined;
+export interface Context<T> {
+  signal: AbortController["signal"] | undefined;
+  isCancelled(): boolean;
+  isStale(): boolean;
+  use<T>(atom: Atom<T>): EffectResult<T>;
+  use<T>(factory: () => T): EffectResult<T>;
+  use<T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
+  use<T>(deps: any[], factory: () => T): EffectResult<T>;
+  data: T | undefined;
+  cancel(): void;
 }
 
 const isFunc = (value: any): value is Function => typeof value === "function";
-const isAbortControllerSupported = typeof AbortController !== "undefined";
-const isPromiseLike = (value: any): value is Promise<any> =>
-  isFunc(value?.then);
+const isPromise = (value: any): value is Promise<any> => isFunc(value?.then);
+let currentListener: VoidFunction | undefined;
+
+const track = (refresh: VoidFunction | undefined, f: Function) => {
+  const prevListener = currentListener;
+  try {
+    currentListener = refresh;
+    return f();
+  } finally {
+    currentListener = prevListener;
+  }
+};
+
+const createContext = <T>(
+  cache: Cache[],
+  data: T,
+  isStale: () => boolean
+): Context<T> => {
+  let hookIndex = 0;
+  const ac =
+    typeof AbortController !== "undefined" ? new AbortController() : undefined;
+  let cancelled = false;
+
+  return {
+    signal: ac?.signal,
+    isCancelled: () => cancelled,
+    isStale: () => cancelled || isStale(),
+    cancel() {
+      if (cancelled) return;
+      ac?.abort();
+      cancelled = true;
+    },
+    use(...args: any[]) {
+      if (args[0]?.listen && args[0]?.use) {
+        const atom: Atom = args[0];
+        if (atom.loading) throw (atom as any).$$promise;
+        if (atom.error) throw atom.error;
+        return atom.data;
+      }
+      let deps: any[];
+      let factory: Function;
+      if (isFunc(args[0])) {
+        deps = [];
+        [factory] = args;
+      } else {
+        [deps, factory] = args;
+      }
+
+      let m = cache[hookIndex];
+      track(undefined, () => {
+        const shouldUpdate =
+          !m ||
+          m.deps.length !== deps.length ||
+          m.deps.some((x, i) => x !== deps[i]);
+
+        if (shouldUpdate) {
+          const value = factory(...deps);
+          cache[hookIndex] = m = { value, deps };
+          // handle async
+          if (isPromise(value)) {
+            m.value = undefined;
+            // refresh function will handle this
+            throw new Promise<void>((resolve) => {
+              const onSuccess = (r: any) => (m.value = r);
+              const onError = (e: any) => (m.error = e);
+              value.then(onSuccess, onError).finally(resolve);
+            });
+          }
+        }
+      });
+      if (m.error) throw m.error;
+      hookIndex++;
+      return m.value;
+    },
+    data,
+  };
+};
+
+const notify = (
+  listeners: VoidFunction[] | Set<VoidFunction> | Map<any, VoidFunction>
+) => listeners.forEach((x) => x());
 
 /**
  * create an atom with specified initial data.
@@ -120,121 +182,49 @@ const isPromiseLike = (value: any): value is Promise<any> =>
  * @returns
  */
 const create = <T = any>(
-  initial?: T | ((use: UseFunction, context: Context) => T),
+  initial?: T | ((context: Context<T>) => T),
   options?: Options<T>
 ): Atom<T> => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
   const factory: Function | false = isFunc(initial) && initial;
   let data: any = factory ? undefined : initial;
-  let hookIndex = 0;
   let changeToken = {};
   let loading = false;
   let error: any;
   let lastPromise: Promise<void> | undefined;
-  let tracking = 0;
   let atom: InternalAtom<T>;
-  let externalUpdate: VoidFunction;
-  let lastAbortController: AbortController | undefined;
+  let lastContext: Context<T> | undefined;
 
-  const track = (refresh: VoidFunction | undefined, f: Function) => {
-    const prevListener = currentListener;
-    tracking++;
-    try {
-      currentListener = refresh;
-      return f();
-    } finally {
-      currentListener = prevListener;
-      tracking--;
-    }
-  };
-
-  const notify = () => listeners.forEach((x) => x());
-
-  const use = (...args: any[]) => {
-    if (args[0]?.listen && args[0]?.use) {
-      const atom: Atom = args[0];
-      if (atom.loading) throw (atom as any).$$promise;
-      if (atom.error) throw atom.error;
-      return atom.data;
-    }
-    let deps: any[];
-    let factory: Function;
-    if (isFunc(args[0])) {
-      deps = [];
-      [factory] = args;
-    } else {
-      [deps, factory] = args;
-    }
-
-    let m = cache[hookIndex];
-    track(undefined, () => {
-      const shouldUpdate =
-        !m ||
-        m.deps.length !== deps.length ||
-        m.deps.some((x, i) => x !== deps[i]);
-
-      if (shouldUpdate) {
-        const value = factory(...deps);
-        cache[hookIndex] = m = { value, deps };
-        // handle async
-        if (isPromiseLike(value)) {
-          m.value = undefined;
-          // refresh function will handle this
-          throw new Promise<void>((resolve) => {
-            value.then(
-              (r: any) => {
-                m.value = r;
-                resolve();
-              },
-              (e: any) => {
-                m.error = e;
-                resolve();
-              }
-            );
-          });
-        }
-      }
-    });
-    if (m.error) throw m.error;
-    hookIndex++;
-    return m.value;
-  };
-
-  const update = (internal: boolean) => {
-    const prevDependents = [...listeners];
+  const update = (fn: Function | false = factory, hydrating = false) => {
+    const prevListeners = [...listeners];
     loading = false;
     error = undefined;
     lastPromise = undefined;
     listeners.clear();
-    if (!internal && factory) {
-      track(externalUpdate, () => {
-        hookIndex = 0;
+    if (fn) {
+      track(update, () => {
         try {
-          lastAbortController?.abort();
-          if (isAbortControllerSupported) {
-            lastAbortController = new AbortController();
-          }
-          const context: Context = { abortController: lastAbortController };
-          const result = factory(use, context);
-          if (isPromiseLike(result)) {
-            throw new Error(
-              "The atom factory result cannot be promise object. Use use() to handle async data"
-            );
-          }
+          lastContext?.cancel();
+          const token = changeToken;
+          lastContext = createContext(cache, data, () => token !== changeToken);
+          const result = fn(lastContext);
+          if (isPromise(result))
+            throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
           if (result !== data) {
             data = result;
+            !hydrating && options?.save?.(data);
           }
         } catch (e) {
           // handle promise object that is thrown by use()
-          if (isPromiseLike(e)) {
+          if (isPromise(e)) {
             loading = true;
             lastPromise = e;
             const token = changeToken;
             e.finally(() => {
               // skip refresh if the data has been changed since last time
               if (token !== changeToken) return;
-              update(internal);
+              update();
             });
           } else {
             error = e;
@@ -242,105 +232,15 @@ const create = <T = any>(
         }
       });
     }
-    prevDependents.forEach((x) => x());
+    notify(prevListeners);
   };
 
-  externalUpdate = () => update(false);
-
-  const listen = (listener: VoidFunction) => {
-    let active = true;
-    const wrappedListener = () => {
-      if (!active) return;
-      listeners.add(wrappedListener);
-      listener();
-    };
-    listeners.add(wrappedListener);
-    return () => {
-      if (!active) return;
-      active = false;
-      listeners.delete(wrappedListener);
-    };
+  const set = (updateFn: UpdateFn<T> | UpdateFn<T>[], hydrating = false) => {
+    const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
+    update(() => fns.reduce((d, f) => f(d), data), hydrating);
   };
 
-  const Use: Use<T> = (...args: any[]) => {
-    const rerender = useState<any>()[1];
-    const activeRef = useRef(true);
-    const shouldUpdateRef = useRef<ShouldUpdateFn<T>>();
-    let mode: Mode;
-
-    if (isFunc(args[0])) {
-      mode = MODE_ALL;
-      [shouldUpdateRef.current] = args;
-    } else {
-      [mode = MODE_ALL, shouldUpdateRef.current] = args;
-    }
-
-    activeRef.current = true;
-    useEffect(
-      () => () => {
-        activeRef.current = false;
-      },
-      []
-    );
-    useEffect(() => {
-      activeRef.current = true;
-      let [prevError, prevLoading, prevData] = [error, loading, data];
-      return listen(() => {
-        if (!activeRef.current) return;
-        if (prevError === error && prevLoading === loading && prevData === data)
-          return;
-        if (shouldUpdateRef.current && !shouldUpdateRef.current(data, prevData))
-          return;
-        [prevError, prevLoading, prevData] = [error, loading, data];
-        rerender({});
-      });
-    }, [rerender]);
-    if (mode) {
-      if (loading && (mode === MODE_SUSPENSE || mode === MODE_ALL))
-        throw lastPromise;
-      if (error && (mode === MODE_ERROR_BOUNDARY || mode === MODE_ALL))
-        throw error;
-    }
-    return data;
-  };
-
-  const set = (value: T | ((prev: T) => T), hydrating = false) => {
-    try {
-      if (isFunc(value)) {
-        const fn = value;
-        // disable tracking
-        value = track(undefined, () => fn(data));
-      }
-    } catch (e) {
-      error = e;
-      notify();
-      return atom;
-    }
-
-    if (value === data) return atom;
-    changeToken = {};
-    data = value;
-    !hydrating && options?.dehydrate?.(data);
-    update(true);
-    return atom;
-  };
-
-  const addDependant = () => {
-    if (!currentListener) return;
-    if (tracking) throw new Error("Circular dependencies");
-    listeners.add(currentListener);
-  };
-
-  if (options?.hydrate) {
-    const [ok, dehydratedData] = options.hydrate();
-    if (ok) {
-      set(dehydratedData, true);
-    } else {
-      externalUpdate();
-    }
-  } else {
-    externalUpdate();
-  }
+  const addDependant = () => currentListener && listeners.add(currentListener);
 
   atom = {
     get loading() {
@@ -354,7 +254,7 @@ const create = <T = any>(
     set error(e: any) {
       if (e !== error) {
         error = e;
-        notify();
+        notify(listeners);
       }
     },
     get data(): T {
@@ -362,26 +262,100 @@ const create = <T = any>(
       return data;
     },
     set data(value: T) {
-      set(value);
+      set(() => value);
     },
     get untrackedData() {
       return data;
     },
-    set,
-    use: Use,
-    listen,
+    set(...args: any[]) {
+      set(typeof args[0] === "function" ? args : () => args[0]);
+      return atom;
+    },
+    use: function Use(...args: any) {
+      const rerender = useState<any>()[1];
+      const activeRef = useRef(true);
+      const shouldUpdateRef = useRef<ShouldUpdateFn<T>>();
+      let mode: Mode;
+
+      if (isFunc(args[0])) {
+        mode = MODE_ALL;
+        [shouldUpdateRef.current] = args;
+      } else {
+        [mode = MODE_ALL, shouldUpdateRef.current] = args;
+      }
+
+      activeRef.current = true;
+      useEffect(
+        () => () => {
+          activeRef.current = false;
+        },
+        []
+      );
+      useEffect(() => {
+        activeRef.current = true;
+        let [prevError, prevLoading, prevData] = [error, loading, data];
+        return atom.listen(() => {
+          if (!activeRef.current) return;
+          if (
+            prevError === error &&
+            prevLoading === loading &&
+            prevData === data
+          )
+            return;
+          if (
+            shouldUpdateRef.current &&
+            !shouldUpdateRef.current(data, prevData)
+          )
+            return;
+          [prevError, prevLoading, prevData] = [error, loading, data];
+          rerender({});
+        });
+      }, [rerender]);
+      if (mode) {
+        if (loading && (mode === MODE_SUSPENSE || mode === MODE_ALL))
+          throw lastPromise;
+        if (error && (mode === MODE_ERROR_BOUNDARY || mode === MODE_ALL))
+          throw error;
+      }
+      return data;
+    },
+    listen(listener) {
+      let active = true;
+      const wrappedListener = () => {
+        if (!active) return;
+        listeners.add(wrappedListener);
+        listener();
+      };
+      listeners.add(wrappedListener);
+      return () => {
+        if (!active) return;
+        active = false;
+        listeners.delete(wrappedListener);
+      };
+    },
     reset() {
       if (factory) {
-        externalUpdate();
-        options?.dehydrate?.(data);
+        update();
+        options?.save?.(data);
       } else {
-        set(initial as T);
+        set(() => initial as T);
       }
     },
     get $$promise() {
       return lastPromise;
     },
   };
+
+  if (options?.load) {
+    const loaded = options.load();
+    if (loaded) {
+      set(() => loaded.data, true);
+    } else {
+      update();
+    }
+  } else {
+    update();
+  }
 
   return atom;
 };
