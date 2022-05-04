@@ -87,4 +87,8 @@ test("call action", () => {
   expect(counter.data).toBe(2);
   counter.call("decrement");
   expect(counter.data).toBe(1);
+  counter.call("decrement");
+  expect(counter.data).toBe(0);
+  counter.reset();
+  expect(counter.data).toBe(1);
 });

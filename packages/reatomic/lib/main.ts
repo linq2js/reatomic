@@ -86,8 +86,9 @@ export interface Atom<T = any> {
   listen(listener: VoidFunction): VoidFunction;
 }
 
-export interface CallableAtom<T = any, A extends Action = AnyAction>
-  extends Omit<Atom<T>, "set"> {
+export interface AtomWithReducer<T = any, A extends Action = AnyAction>
+  extends Omit<Atom<T>, "set" | "data"> {
+  readonly data: T;
   /**
    * call an action, this method works like redux store's dispatch method
    * @param action
@@ -100,7 +101,7 @@ export interface CallableAtom<T = any, A extends Action = AnyAction>
   call(action: A): this;
 }
 
-type InternalAtom = CallableAtom &
+type InternalAtom = AtomWithReducer &
   Atom & {
     readonly $$promise: Promise<void> | undefined;
   };
@@ -108,10 +109,19 @@ type InternalAtom = CallableAtom &
 type Cache = { value: any; error?: any; deps: any[] };
 
 export interface Create {
-  (): Atom<undefined>;
+  /**
+   * create an atom that can store any data, the atom's initial data is undefined
+   */
+  (): Atom<any>;
 
-  <T = any>(factory: Factory<T>, options?: Options): Atom<T>;
+  /**
+   * create an atom with data compute function
+   */
+  <T = any>(computeFn: ComputeFn<T>, options?: Options): Atom<T>;
 
+  /**
+   * create an atom with initial data
+   */
   <T>(data: T, options?: Options): Atom<T>;
 
   /**
@@ -120,7 +130,7 @@ export interface Create {
   <T = any, A extends Action = AnyAction>(
     reducer: Reducer<T, A>,
     options?: Options & { reducer: true }
-  ): CallableAtom<T, A>;
+  ): AtomWithReducer<T, A>;
 }
 
 export interface Context {
@@ -156,7 +166,7 @@ export type Reducer<T = any, A extends Action = AnyAction> = (
   action: A
 ) => T;
 
-export type Factory<T = any> = (context: Context) => T;
+export type ComputeFn<T = any> = (context: Context) => T;
 
 const isFunc = (value: any): value is Function => typeof value === "function";
 const isPromise = (value: any): value is Promise<any> => isFunc(value?.then);
@@ -267,8 +277,8 @@ const create: Create = (
 ): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
-  const reducer: Reducer | false = isFunc(initial) && initial;
-  let data: any = reducer ? undefined : initial;
+  const fn: Reducer | false = isFunc(initial) && initial;
+  let data: any = fn ? undefined : initial;
   let changeToken = {};
   let loading = false;
   let error: any;
@@ -276,9 +286,10 @@ const create: Create = (
   let atom: InternalAtom;
   let lastContext: Context | undefined;
   let lastAction: Action | undefined;
+  let hydratedData: any;
 
   const update = (
-    fn: Reducer | false = reducer,
+    computeFn: Reducer | false = fn,
     hydrating = false,
     action = lastAction ?? UPDATE_ACTION
   ) => {
@@ -287,7 +298,7 @@ const create: Create = (
     error = undefined;
     lastPromise = undefined;
     listeners.clear();
-    if (fn) {
+    if (computeFn) {
       track(
         // disable tracking for reducer
         options?.reducer ? undefined : update,
@@ -301,7 +312,7 @@ const create: Create = (
               changeToken,
               () => token !== changeToken
             );
-            const result = fn(lastContext, data, action as Action);
+            const result = computeFn(lastContext, data, action as Action);
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
             if (result !== data) {
@@ -331,6 +342,11 @@ const create: Create = (
   };
 
   const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
+    if (!hydrating && options?.reducer) {
+      throw new Error(
+        "Cannot update atom data in reducer mode directly. Use call(action) method instead"
+      );
+    }
     const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
     update(() => fns.reduce((d, f) => f(d), data), hydrating);
   };
@@ -438,8 +454,14 @@ const create: Create = (
       };
     },
     reset() {
-      if (reducer) {
-        update();
+      if (fn) {
+        if (options?.reducer) {
+          // reset data to hydrated data
+          data = hydratedData;
+          update(undefined, false, UPDATE_ACTION);
+        } else {
+          update();
+        }
         options?.save?.(data);
       } else {
         set(() => initial);
@@ -450,6 +472,7 @@ const create: Create = (
   if (options?.load) {
     const loaded = options.load();
     if (loaded) {
+      hydratedData = loaded.data;
       set(() => loaded.data, true);
     } else {
       update();

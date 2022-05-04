@@ -33,7 +33,7 @@ https://codesandbox.io/s/reatomic-demo-forked-ydpm9r
 
 | Name                           | Bundle Size (GZipped) | Async Data | State dependencies | Suspense | Error Boundary |
 | ------------------------------ | --------------------: | :--------: | :----------------: | :------: | :------------: |
-| reatomic                       |                   ~1K |     ✓      |         ✓          |    ✓     |       ✓        |
+| reatomic                       |                  1.4K |     ✓      |         ✓          |    ✓     |       ✓        |
 | nanostores + @nanostores/react |                  2.3K |            |         ✓          |          |                |
 | redux + react-redux            |                  2.7K |            |                    |          |                |
 | @reatom/core + @reatom/react   |                  3.1K |     ✓      |         ✓          |          |                |
@@ -185,4 +185,12 @@ const counter = atom((context, prev = 1, action) => {
   if (action.type === "decrement") return prev - 1;
   return prev;
 });
+counter.call("increment");
+console.log(counter.data); // 2
+counter.call("decrement");
+console.log(counter.data); // 1
 ```
+
+## API Referrences
+
+The reatomic has one export, refer this for more info https://linq2js.github.io/reatomic/interfaces/Create.html
