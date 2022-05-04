@@ -33,7 +33,7 @@ https://codesandbox.io/s/reatomic-demo-forked-ydpm9r
 
 | Name                           | Bundle Size (GZipped) | Async Data | State dependencies | Suspense | Error Boundary |
 | ------------------------------ | --------------------: | :--------: | :----------------: | :------: | :------------: |
-| reatomic                       |                  1.4K |     ✓      |         ✓          |    ✓     |       ✓        |
+| reatomic                       |                  1.5K |     ✓      |         ✓          |    ✓     |       ✓        |
 | nanostores + @nanostores/react |                  2.3K |            |         ✓          |          |                |
 | redux + react-redux            |                  2.7K |            |                    |          |                |
 | @reatom/core + @reatom/react   |                  3.1K |     ✓      |         ✓          |          |                |

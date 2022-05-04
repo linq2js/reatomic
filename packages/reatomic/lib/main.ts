@@ -1,18 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
-const MODE_ALL = "all";
-const MODE_SUSPENSE = "suspense";
-const MODE_ERROR_BOUNDARY = "errorBoundary";
-const MODE_NONE = "none";
+const BIND_MODE_ALL = "all";
+const BIND_MODE_SUSPENSE = "suspense";
+const BIND_MODE_ERROR_BOUNDARY = "errorBoundary";
+const BIND_MODE_NONE = "none";
 const ERROR_RESULT_IS_PROMISE_OBJECT = "The result cannot be promise object";
 
 export type UpdateFn<T = any> = (prev: T) => T;
 
-export type Mode =
-  | typeof MODE_ALL
-  | typeof MODE_SUSPENSE
-  | typeof MODE_ERROR_BOUNDARY
-  | typeof MODE_NONE;
+export type BindMode =
+  | typeof BIND_MODE_ALL
+  | typeof BIND_MODE_SUSPENSE
+  | typeof BIND_MODE_ERROR_BOUNDARY
+  | typeof BIND_MODE_NONE;
+
+export const EXECUTE_MODE_REDUCER = "reducer";
+export const EXECUTE_MODE_MUTATION = "mutation";
+
+export type ExecuteMode =
+  | typeof EXECUTE_MODE_REDUCER
+  | typeof EXECUTE_MODE_MUTATION;
 
 /**
  * Use this function to let reatomic knows when the host component should update.
@@ -77,7 +84,7 @@ export interface Atom<T = any> {
   /**
    * bind the atom to the current react component
    */
-  use(mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
+  use(mode?: BindMode, shouldUpdate?: ShouldUpdateFn<T>): T;
   use(shouldUpdate: ShouldUpdateFn<T>): T;
   /**
    * listen atom data change event
@@ -86,7 +93,7 @@ export interface Atom<T = any> {
   listen(listener: VoidFunction): VoidFunction;
 }
 
-export interface AtomWithReducer<T = any, A extends Action = AnyAction>
+interface CallableAtom<T = any, A extends Action = AnyAction>
   extends Omit<Atom<T>, "set" | "data"> {
   readonly data: T;
   /**
@@ -101,6 +108,18 @@ export interface AtomWithReducer<T = any, A extends Action = AnyAction>
   call(action: A): this;
 }
 
+/**
+ * Atom for reducer mode
+ */
+export interface AtomWithReducer<T = any, A extends Action = AnyAction>
+  extends CallableAtom<T, A> {}
+
+/**
+ * Atom for mutation mode
+ */
+export interface AtomWithMutation<T = any, A extends Action = AnyAction>
+  extends Omit<CallableAtom<T, A>, "reset"> {}
+
 type InternalAtom = AtomWithReducer &
   Atom & {
     readonly $$promise: Promise<void> | undefined;
@@ -108,7 +127,7 @@ type InternalAtom = AtomWithReducer &
 
 type Cache = { value: any; error?: any; deps: any[] };
 
-export interface Create {
+export interface DefaultExport {
   /**
    * create an atom that can store any data, the atom's initial data is undefined
    */
@@ -129,12 +148,21 @@ export interface Create {
    */
   <T = any, A extends Action = AnyAction>(
     reducer: Reducer<T, A>,
-    options: AtomWithReducerOptions
+    options: AtomWithReducerOptions | typeof EXECUTE_MODE_REDUCER
   ): AtomWithReducer<T, A>;
+
+  <T = any, A extends Action = AnyAction>(
+    mutation: Mutation<T, A>,
+    options: AtomWithMutatonOptions | typeof EXECUTE_MODE_MUTATION
+  ): AtomWithMutation<T, A>;
 }
 
 export interface AtomWithReducerOptions extends Options {
-  reducer: true;
+  mode: typeof EXECUTE_MODE_REDUCER;
+}
+
+export interface AtomWithMutatonOptions extends Omit<Options, "load" | "save"> {
+  mode: typeof EXECUTE_MODE_MUTATION;
 }
 
 export interface Context {
@@ -167,6 +195,11 @@ export interface Context {
 export type Reducer<T = any, A extends Action = AnyAction> = (
   context: Context,
   prev: T,
+  action: A
+) => T;
+
+export type Mutation<T = any, A extends Action = AnyAction> = (
+  context: Context,
   action: A
 ) => T;
 
@@ -281,13 +314,13 @@ const notify = (
  * @param initial
  * @returns
  */
-const create: Create = (
+const create: DefaultExport = (
   initial?: any,
-  options?: Options & { reducer?: true }
+  options?: (Options & { mode?: ExecuteMode }) | ExecuteMode
 ): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
-  const fn: Reducer | false = isFunc(initial) && initial;
+  const fn: Function | false = isFunc(initial) && initial;
   let data: any = fn ? undefined : initial;
   let changeToken = {};
   let loading = false;
@@ -296,10 +329,19 @@ const create: Create = (
   let atom: InternalAtom;
   let lastContext: Context | undefined;
   let lastAction: Action | undefined;
-  let hydratedData: any;
+  let loadedData: any;
+  let mode: ExecuteMode | undefined;
+  let load: Function | undefined;
+  let save: Function | undefined;
+
+  if (typeof options === "string") {
+    mode = options;
+  } else if (options) {
+    [mode, save, load] = [options.mode, options.save, options.load];
+  }
 
   const update = (
-    computeFn: Reducer | false = fn,
+    computeFn: Function | false = fn,
     hydrating = false,
     action = lastAction ?? UPDATE_ACTION
   ) => {
@@ -310,8 +352,8 @@ const create: Create = (
     listeners.clear();
     if (computeFn) {
       track(
-        // disable tracking for reducer
-        options?.reducer ? undefined : update,
+        // disable tracking for custom execute mode
+        mode ? undefined : update,
         () => {
           try {
             lastContext?.cancel();
@@ -322,13 +364,20 @@ const create: Create = (
               changeToken,
               () => token !== changeToken
             );
-            const result = computeFn(lastContext, data, action as Action);
+            const result =
+              mode === EXECUTE_MODE_MUTATION
+                ? computeFn(lastContext, action as Action)
+                : computeFn(lastContext, data, action as Action);
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
-            if (result !== data) {
+            if (mode === EXECUTE_MODE_MUTATION) {
               data = result;
-              changeToken = {};
-              if (!hydrating) options?.save?.(data);
+            } else {
+              if (result !== data) {
+                data = result;
+                changeToken = {};
+                if (!hydrating) save?.(data);
+              }
             }
           } catch (e) {
             // handle promise object that is thrown by use()
@@ -352,9 +401,9 @@ const create: Create = (
   };
 
   const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
-    if (!hydrating && options?.reducer) {
+    if (!hydrating && mode) {
       throw new Error(
-        "Cannot update atom data in reducer mode directly. Use call(action) method instead"
+        "Cannot update atom data in reducer/mutation mode directly. Use call(action) method instead"
       );
     }
     const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
@@ -405,13 +454,13 @@ const create: Create = (
       const rerender = useState<any>()[1];
       const activeRef = useRef(true);
       const shouldUpdateRef = useRef<ShouldUpdateFn>();
-      let mode: Mode;
+      let mode: BindMode;
 
       if (isFunc(args[0])) {
-        mode = MODE_ALL;
+        mode = BIND_MODE_ALL;
         [shouldUpdateRef.current] = args;
       } else {
-        [mode = MODE_ALL, shouldUpdateRef.current] = args;
+        [mode = BIND_MODE_ALL, shouldUpdateRef.current] = args;
       }
 
       activeRef.current = true;
@@ -442,9 +491,12 @@ const create: Create = (
         });
       }, [rerender]);
       if (mode) {
-        if (loading && (mode === MODE_SUSPENSE || mode === MODE_ALL))
+        if (loading && (mode === BIND_MODE_SUSPENSE || mode === BIND_MODE_ALL))
           throw lastPromise;
-        if (error && (mode === MODE_ERROR_BOUNDARY || mode === MODE_ALL))
+        if (
+          error &&
+          (mode === BIND_MODE_ERROR_BOUNDARY || mode === BIND_MODE_ALL)
+        )
           throw error;
       }
       return data;
@@ -465,30 +517,37 @@ const create: Create = (
     },
     reset() {
       if (fn) {
-        if (options?.reducer) {
+        if (mode === EXECUTE_MODE_REDUCER) {
           // reset data to hydrated data
-          data = hydratedData;
+          data = loadedData;
           update(undefined, false, UPDATE_ACTION);
-        } else {
+        } else if (!mode) {
           update();
         }
-        options?.save?.(data);
+        save?.(data);
       } else {
         set(() => initial);
       }
     },
   };
 
-  if (options?.load) {
-    const loaded = options.load();
-    if (loaded) {
-      hydratedData = loaded.data;
-      set(() => loaded.data, true);
+  // start initializing phase
+  if (mode !== EXECUTE_MODE_MUTATION) {
+    // load data from external source
+    if (load) {
+      const loaded = load();
+      if (loaded) {
+        // save loaded data for later use
+        loadedData = loaded.data;
+        // update data with loadedData
+        set(() => loadedData, true);
+      } else {
+        // init data as normal way
+        update();
+      }
     } else {
       update();
     }
-  } else {
-    update();
   }
 
   return atom;

@@ -68,20 +68,17 @@ test("persist data", async () => {
   expect(saved).toBe(0);
 });
 
-test("call action", () => {
+test("reducer mode", () => {
   type CounterAction = Action<"init" | "increment" | "decrement">;
-  const counter = atom(
-    (_, data: number = 1, action: CounterAction) => {
-      if (action.type === "increment") {
-        return data + 1;
-      }
-      if (action.type === "decrement") {
-        return data - 1;
-      }
-      return data;
-    },
-    { reducer: true }
-  );
+  const counter = atom((_, data: number = 1, action: CounterAction) => {
+    if (action.type === "increment") {
+      return data + 1;
+    }
+    if (action.type === "decrement") {
+      return data - 1;
+    }
+    return data;
+  }, "reducer");
   expect(counter.data).toBe(1);
   counter.call("increment");
   expect(counter.data).toBe(2);
@@ -91,4 +88,16 @@ test("call action", () => {
   expect(counter.data).toBe(0);
   counter.reset();
   expect(counter.data).toBe(1);
+});
+
+test("mutation", () => {
+  type UpdateUserProfileAction = { type: "update"; payload: any };
+  let payload: any;
+  const updateUserProfile = atom((_, action: UpdateUserProfileAction) => {
+    payload = action.payload;
+    return true;
+  }, "mutation");
+  expect(payload).toBeUndefined();
+  updateUserProfile.call({ type: "update", payload: 1 });
+  expect(payload).toBe(1);
 });
