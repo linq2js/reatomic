@@ -1,4 +1,4 @@
-import atom from "./main";
+import atom, { Action } from "./main";
 
 const delay = <T = unknown>(ms: number = 0, value?: T) =>
   new Promise<T>((resolve) => setTimeout(resolve, ms, value));
@@ -66,4 +66,22 @@ test("persist data", async () => {
   counter.reset();
   expect(counter.data).toBe(0);
   expect(saved).toBe(0);
+});
+
+test("call action", () => {
+  type CounterAction = Action<"increment" | "decrement">;
+  const counter = atom(({ data = 1 }, action: CounterAction) => {
+    if (action.type === "increment") {
+      return data + 1;
+    }
+    if (action.type === "decrement") {
+      return data - 1;
+    }
+    return data;
+  });
+  expect(counter.data).toBe(1);
+  counter.call("increment");
+  expect(counter.data).toBe(2);
+  counter.call("decrement");
+  expect(counter.data).toBe(1);
 });

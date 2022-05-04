@@ -113,7 +113,7 @@ function loadUserProfile(token) {
 }
 
 const accessToken = atom(localStorage.getItem("token"));
-const userProfile = atom(() => {
+const userProfile = atom(({ use }) => {
   if (!accessToken.data) return { username: "anonymous" };
   const userProfileJson = use(
     // this use has one dependencies: accessToken.data

@@ -6,7 +6,7 @@ const MODE_ERROR_BOUNDARY = "errorBoundary";
 const MODE_NONE = "none";
 const ERROR_RESULT_IS_PROMISE_OBJECT = "The result cannot be promise object";
 
-export type UpdateFn<T> = (prev: T) => T;
+export type UpdateFn<T = any> = (prev: T) => T;
 
 export type Mode =
   | typeof MODE_ALL
@@ -18,13 +18,21 @@ export type Mode =
  * Use this function to let reatomic knows when the host component should update.
  * Let say you have an atom with a lot of properties and you need the component when some of properties are changed, not at all
  */
-export type ShouldUpdateFn<T> = (next: T, prev: T) => boolean;
+export type ShouldUpdateFn<T = any> = (next: T, prev: T) => boolean;
 
 export type EffectResult<T> = T extends Promise<infer R> ? R : T;
 
-export interface Options<T> {
+export interface Options<T = any> {
   load?: () => { data: T } | undefined;
   save?: (data: T) => void;
+}
+
+export interface Action<T extends string = string> {
+  type: T;
+}
+
+export interface AnyAction extends Action {
+  [key: string]: any;
 }
 
 export interface Atom<T = any> {
@@ -74,13 +82,39 @@ export interface Atom<T = any> {
   listen(listener: VoidFunction): VoidFunction;
 }
 
-interface InternalAtom<T = any> extends Atom<T> {
+export interface CallableAtom<T = any, A extends Action = AnyAction>
+  extends Atom<T> {
+  /**
+   * call an action, this method works like redux store's dispatch method
+   * @param action
+   */
+  call(action: A["type"]): this;
+  /**
+   * call an action, this method works like redux store's dispatch method
+   * @param action
+   */
+  call(action: A): this;
+}
+
+interface InternalAtom extends CallableAtom {
   readonly $$promise: Promise<void> | undefined;
 }
 
 type Cache = { value: any; error?: any; deps: any[] };
 
-export interface Context<T> {
+export interface Create {
+  (): Atom<undefined>;
+  <T = any, A extends Action = AnyAction>(
+    factory: Factory<T, A>,
+    options?: Options<T>
+  ): CallableAtom<T, A>;
+  <T>(data: T, options?: Options<T>): Atom<T>;
+}
+
+export interface Context<T = any> {
+  /**
+   * AbortController signal, the signal might be undefined because some platforms does not support AbortController (node JS)
+   */
   signal: AbortController["signal"] | undefined;
   isCancelled(): boolean;
   isStale(): boolean;
@@ -91,6 +125,11 @@ export interface Context<T> {
   data: T | undefined;
   cancel(): void;
 }
+
+export type Factory<T = any, A extends Action = AnyAction> = (
+  context: Context<T>,
+  action: A
+) => T;
 
 const isFunc = (value: any): value is Function => typeof value === "function";
 const isPromise = (value: any): value is Promise<any> => isFunc(value?.then);
@@ -171,6 +210,8 @@ const createContext = <T>(
   };
 };
 
+const UPDATE_ACTION: Action = { type: "@@update" };
+
 const notify = (
   listeners: VoidFunction[] | Set<VoidFunction> | Map<any, VoidFunction>
 ) => listeners.forEach((x) => x());
@@ -181,22 +222,23 @@ const notify = (
  * @param initial
  * @returns
  */
-const create = <T = any>(
-  initial?: T | ((context: Context<T>) => T),
-  options?: Options<T>
-): Atom<T> => {
+const create: Create = (initial?: any, options?: Options): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
-  const factory: Function | false = isFunc(initial) && initial;
+  const factory: Factory | false = isFunc(initial) && initial;
   let data: any = factory ? undefined : initial;
   let changeToken = {};
   let loading = false;
   let error: any;
   let lastPromise: Promise<void> | undefined;
-  let atom: InternalAtom<T>;
-  let lastContext: Context<T> | undefined;
+  let atom: InternalAtom;
+  let lastContext: Context | undefined;
 
-  const update = (fn: Function | false = factory, hydrating = false) => {
+  const update = (
+    fn: Factory | false = factory,
+    hydrating = false,
+    action: Action = UPDATE_ACTION
+  ) => {
     const prevListeners = [...listeners];
     loading = false;
     error = undefined;
@@ -208,7 +250,7 @@ const create = <T = any>(
           lastContext?.cancel();
           const token = changeToken;
           lastContext = createContext(cache, data, () => token !== changeToken);
-          const result = fn(lastContext);
+          const result = fn(lastContext, action);
           if (isPromise(result))
             throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
           if (result !== data) {
@@ -235,7 +277,7 @@ const create = <T = any>(
     notify(prevListeners);
   };
 
-  const set = (updateFn: UpdateFn<T> | UpdateFn<T>[], hydrating = false) => {
+  const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
     const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
     update(() => fns.reduce((d, f) => f(d), data), hydrating);
   };
@@ -257,24 +299,34 @@ const create = <T = any>(
         notify(listeners);
       }
     },
-    get data(): T {
+    get data() {
       addDependant();
       return data;
     },
-    set data(value: T) {
+    set data(value) {
       set(() => value);
     },
     get untrackedData() {
       return data;
     },
+    get $$promise() {
+      return lastPromise;
+    },
+    call(action) {
+      if (typeof action === "string") {
+        action = { type: action };
+      }
+      update(initial, false, action);
+      return atom;
+    },
     set(...args: any[]) {
-      set(typeof args[0] === "function" ? args : () => args[0]);
+      set(isFunc(args[0]) ? args : () => args[0]);
       return atom;
     },
     use: function Use(...args: any) {
       const rerender = useState<any>()[1];
       const activeRef = useRef(true);
-      const shouldUpdateRef = useRef<ShouldUpdateFn<T>>();
+      const shouldUpdateRef = useRef<ShouldUpdateFn>();
       let mode: Mode;
 
       if (isFunc(args[0])) {
@@ -338,11 +390,8 @@ const create = <T = any>(
         update();
         options?.save?.(data);
       } else {
-        set(() => initial as T);
+        set(() => initial);
       }
-    },
-    get $$promise() {
-      return lastPromise;
     },
   };
 
