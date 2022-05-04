@@ -69,16 +69,19 @@ test("persist data", async () => {
 });
 
 test("call action", () => {
-  type CounterAction = Action<"increment" | "decrement">;
-  const counter = atom(({ data = 1 }, action: CounterAction) => {
-    if (action.type === "increment") {
-      return data + 1;
-    }
-    if (action.type === "decrement") {
-      return data - 1;
-    }
-    return data;
-  });
+  type CounterAction = Action<"init" | "increment" | "decrement">;
+  const counter = atom(
+    (_, data: number = 1, action: CounterAction) => {
+      if (action.type === "increment") {
+        return data + 1;
+      }
+      if (action.type === "decrement") {
+        return data - 1;
+      }
+      return data;
+    },
+    { reducer: true }
+  );
   expect(counter.data).toBe(1);
   counter.call("increment");
   expect(counter.data).toBe(2);

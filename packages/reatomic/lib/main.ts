@@ -22,9 +22,13 @@ export type ShouldUpdateFn<T = any> = (next: T, prev: T) => boolean;
 
 export type EffectResult<T> = T extends Promise<infer R> ? R : T;
 
-export interface Options<T = any> {
-  load?: () => { data: T } | undefined;
-  save?: (data: T) => void;
+export interface Options {
+  load?: () => { data: any } | undefined;
+  save?: (data: any) => void;
+}
+
+export interface Effect<T = any> {
+  effect(context: Context): { call(): T; deps?: any[] };
 }
 
 export interface Action<T extends string = string> {
@@ -83,7 +87,7 @@ export interface Atom<T = any> {
 }
 
 export interface CallableAtom<T = any, A extends Action = AnyAction>
-  extends Atom<T> {
+  extends Omit<Atom<T>, "set"> {
   /**
    * call an action, this method works like redux store's dispatch method
    * @param action
@@ -96,51 +100,72 @@ export interface CallableAtom<T = any, A extends Action = AnyAction>
   call(action: A): this;
 }
 
-interface InternalAtom extends CallableAtom {
-  readonly $$promise: Promise<void> | undefined;
-}
+type InternalAtom = CallableAtom &
+  Atom & {
+    readonly $$promise: Promise<void> | undefined;
+  };
 
 type Cache = { value: any; error?: any; deps: any[] };
 
 export interface Create {
   (): Atom<undefined>;
 
-  <T = any, A extends Action = AnyAction>(
-    init: Factory<T, A>,
-    options?: Options<T>
-  ): CallableAtom<T, A>;
+  <T = any>(factory: Factory<T>, options?: Options): Atom<T>;
 
-  <T>(data: T, options?: Options<T>): Atom<T>;
+  <T>(data: T, options?: Options): Atom<T>;
+
+  /**
+   * create an atom and enable reducer mode, and disable tracking
+   */
+  <T = any, A extends Action = AnyAction>(
+    reducer: Reducer<T, A>,
+    options?: Options & { reducer: true }
+  ): CallableAtom<T, A>;
 }
 
 export interface Context {
   /**
    * AbortController signal, the signal might be undefined because some platforms does not support AbortController (node JS)
    */
-  signal: AbortController["signal"] | undefined;
+  readonly signal: AbortController["signal"] | undefined;
+
+  readonly data?: any;
+
+  readonly token: {};
+
   isCancelled(): boolean;
+
   isStale(): boolean;
+
+  use<T>(effect: Effect<T>): EffectResult<T>;
+
   use<T>(atom: Atom<T>): EffectResult<T>;
+
   use<T>(factory: () => T): EffectResult<T>;
+
   use<T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
+
   use<T>(deps: any[], factory: () => T): EffectResult<T>;
-  data?: any;
+
   cancel(): void;
 }
 
-export type Factory<T = any, A extends Action = AnyAction> = (
+export type Reducer<T = any, A extends Action = AnyAction> = (
   context: Context,
+  prev: T,
   action: A
 ) => T;
+
+export type Factory<T = any> = (context: Context) => T;
 
 const isFunc = (value: any): value is Function => typeof value === "function";
 const isPromise = (value: any): value is Promise<any> => isFunc(value?.then);
 let currentListener: VoidFunction | undefined;
 
-const track = (refresh: VoidFunction | undefined, f: Function) => {
+const track = (updateFn: VoidFunction | undefined, f: Function) => {
   const prevListener = currentListener;
   try {
-    currentListener = refresh;
+    currentListener = updateFn;
     return f();
   } finally {
     currentListener = prevListener;
@@ -150,14 +175,16 @@ const track = (refresh: VoidFunction | undefined, f: Function) => {
 const createContext = <T>(
   cache: Cache[],
   data: T,
+  token: {},
   isStale: () => boolean
-): Context => {
+) => {
   let hookIndex = 0;
   const ac =
     typeof AbortController !== "undefined" ? new AbortController() : undefined;
   let cancelled = false;
 
-  return {
+  const context: Context = {
+    token,
     signal: ac?.signal,
     isCancelled: () => cancelled,
     isStale: () => cancelled || isStale(),
@@ -167,12 +194,20 @@ const createContext = <T>(
       cancelled = true;
     },
     use(...args: any[]) {
+      // is atom
       if (args[0]?.listen && args[0]?.use) {
         const atom: Atom = args[0];
         if (atom.loading) throw (atom as any).$$promise;
         if (atom.error) throw atom.error;
         return atom.data;
       }
+      // is effect
+      if (args[0]?.effect) {
+        const effect: Effect = args[0];
+        const { call, deps = [] } = effect.effect(context);
+        return context.use(deps, call);
+      }
+
       let deps: any[];
       let factory: Function;
       if (isFunc(args[0])) {
@@ -210,6 +245,8 @@ const createContext = <T>(
     },
     data,
   };
+
+  return context;
 };
 
 const UPDATE_ACTION: Action = { type: "@@update" };
@@ -224,22 +261,26 @@ const notify = (
  * @param initial
  * @returns
  */
-const create: Create = (initial?: any, options?: Options): any => {
+const create: Create = (
+  initial?: any,
+  options?: Options & { reducer?: true }
+): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
-  const factory: Factory | false = isFunc(initial) && initial;
-  let data: any = factory ? undefined : initial;
+  const reducer: Reducer | false = isFunc(initial) && initial;
+  let data: any = reducer ? undefined : initial;
   let changeToken = {};
   let loading = false;
   let error: any;
   let lastPromise: Promise<void> | undefined;
   let atom: InternalAtom;
   let lastContext: Context | undefined;
+  let lastAction: Action | undefined;
 
   const update = (
-    fn: Factory | false = factory,
+    fn: Reducer | false = reducer,
     hydrating = false,
-    action: Action = UPDATE_ACTION
+    action = lastAction ?? UPDATE_ACTION
   ) => {
     const prevListeners = [...listeners];
     loading = false;
@@ -247,34 +288,44 @@ const create: Create = (initial?: any, options?: Options): any => {
     lastPromise = undefined;
     listeners.clear();
     if (fn) {
-      track(update, () => {
-        try {
-          lastContext?.cancel();
-          const token = changeToken;
-          lastContext = createContext(cache, data, () => token !== changeToken);
-          const result = fn(lastContext, action);
-          if (isPromise(result))
-            throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
-          if (result !== data) {
-            data = result;
-            !hydrating && options?.save?.(data);
-          }
-        } catch (e) {
-          // handle promise object that is thrown by use()
-          if (isPromise(e)) {
-            loading = true;
-            lastPromise = e;
+      track(
+        // disable tracking for reducer
+        options?.reducer ? undefined : update,
+        () => {
+          try {
+            lastContext?.cancel();
             const token = changeToken;
-            e.finally(() => {
-              // skip refresh if the data has been changed since last time
-              if (token !== changeToken) return;
-              update();
-            });
-          } else {
-            error = e;
+            lastContext = createContext(
+              cache,
+              data,
+              changeToken,
+              () => token !== changeToken
+            );
+            const result = fn(lastContext, data, action as Action);
+            if (isPromise(result))
+              throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
+            if (result !== data) {
+              data = result;
+              changeToken = {};
+              if (!hydrating) options?.save?.(data);
+            }
+          } catch (e) {
+            // handle promise object that is thrown by use()
+            if (isPromise(e)) {
+              loading = true;
+              lastPromise = e;
+              const token = changeToken;
+              e.finally(() => {
+                // skip refresh if the data has been changed since last time
+                if (token !== changeToken) return;
+                update();
+              });
+            } else {
+              error = e;
+            }
           }
         }
-      });
+      );
     }
     notify(prevListeners);
   };
@@ -315,9 +366,8 @@ const create: Create = (initial?: any, options?: Options): any => {
       return lastPromise;
     },
     call(action) {
-      if (typeof action === "string") {
-        action = { type: action };
-      }
+      if (typeof action === "string") action = { type: action };
+      lastAction = action;
       update(initial, false, action);
       return atom;
     },
@@ -388,7 +438,7 @@ const create: Create = (initial?: any, options?: Options): any => {
       };
     },
     reset() {
-      if (factory) {
+      if (reducer) {
         update();
         options?.save?.(data);
       } else {

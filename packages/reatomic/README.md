@@ -176,3 +176,13 @@ const App = () => {
   );
 };
 ```
+
+### Using atom with reducer
+
+```js
+const counter = atom((context, prev = 1, action) => {
+  if (action.type === "increment") return prev + 1;
+  if (action.type === "decrement") return prev - 1;
+  return prev;
+});
+```
