@@ -129,8 +129,12 @@ export interface Create {
    */
   <T = any, A extends Action = AnyAction>(
     reducer: Reducer<T, A>,
-    options?: Options & { reducer: true }
+    options: AtomWithReducerOptions
   ): AtomWithReducer<T, A>;
+}
+
+export interface AtomWithReducerOptions extends Options {
+  reducer: true;
 }
 
 export interface Context {
