@@ -186,6 +186,7 @@ const track = (updateFn: VoidFunction | undefined, f: Function) => {
   }
 };
 
+const isACSupported = typeof AbortController !== "undefined";
 const createContext = <T>(
   cache: Cache[],
   data: T,
@@ -193,13 +194,18 @@ const createContext = <T>(
   isStale: () => boolean
 ) => {
   let hookIndex = 0;
-  const ac =
-    typeof AbortController !== "undefined" ? new AbortController() : undefined;
+  let ac: AbortController | undefined;
   let cancelled = false;
 
   const context: Context = {
     token,
-    signal: ac?.signal,
+    get signal() {
+      if (!ac) {
+        if (!isACSupported) return undefined;
+        ac = new AbortController();
+      }
+      return ac.signal;
+    },
     isCancelled: () => cancelled,
     isStale: () => cancelled || isStale(),
     cancel() {
