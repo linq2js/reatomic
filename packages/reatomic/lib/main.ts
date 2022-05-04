@@ -104,14 +104,16 @@ type Cache = { value: any; error?: any; deps: any[] };
 
 export interface Create {
   (): Atom<undefined>;
+
   <T = any, A extends Action = AnyAction>(
-    factory: Factory<T, A>,
+    init: Factory<T, A>,
     options?: Options<T>
   ): CallableAtom<T, A>;
+
   <T>(data: T, options?: Options<T>): Atom<T>;
 }
 
-export interface Context<T = any> {
+export interface Context {
   /**
    * AbortController signal, the signal might be undefined because some platforms does not support AbortController (node JS)
    */
@@ -122,12 +124,12 @@ export interface Context<T = any> {
   use<T>(factory: () => T): EffectResult<T>;
   use<T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
   use<T>(deps: any[], factory: () => T): EffectResult<T>;
-  data: T | undefined;
+  data?: any;
   cancel(): void;
 }
 
 export type Factory<T = any, A extends Action = AnyAction> = (
-  context: Context<T>,
+  context: Context,
   action: A
 ) => T;
 
@@ -149,7 +151,7 @@ const createContext = <T>(
   cache: Cache[],
   data: T,
   isStale: () => boolean
-): Context<T> => {
+): Context => {
   let hookIndex = 0;
   const ac =
     typeof AbortController !== "undefined" ? new AbortController() : undefined;
