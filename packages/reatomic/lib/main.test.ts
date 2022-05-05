@@ -1,5 +1,5 @@
 import { atom, Action } from "./main";
-import { debounce } from "./concurrency";
+import { debounce, throttle } from "./concurrency";
 
 const delay = <T = unknown>(ms: number = 0, value?: T) =>
   new Promise<T>((resolve) => setTimeout(resolve, ms, value));
@@ -109,9 +109,54 @@ test("debounce", async () => {
     return 1;
   }, "mutation");
   expect(counter.data).toBeUndefined();
-  counter.call({ type: "update" });
-  counter.call({ type: "update" });
-  counter.call({ type: "update" });
+  counter.call();
+  counter.call();
+  counter.call();
   await delay(10);
   expect(counter.data).toBe(1);
+});
+
+test("debounce", async () => {
+  const counter = atom(({ use }) => {
+    use(debounce(5));
+    return 1;
+  }, "mutation");
+  expect(counter.data).toBeUndefined();
+  counter.call();
+  counter.call();
+  counter.call();
+  await delay(10);
+  expect(counter.data).toBe(1);
+});
+
+test("throttle", async () => {
+  const values = [1, 2];
+  const counter = atom(({ use }) => {
+    use(throttle(10));
+    return values.shift();
+  }, "mutation");
+  expect(counter.data).toBeUndefined();
+  counter.call();
+  expect(counter.data).toBe(1);
+  counter.call();
+  expect(counter.data).toBe(1);
+  counter.call();
+  expect(counter.data).toBe(1);
+  await delay(15);
+  expect(counter.data).toBe(1);
+  counter.call();
+  expect(counter.data).toBe(2);
+});
+
+test("updateEffect", async () => {
+  const counter = atom(0, { updateEffect: () => debounce(10) });
+  expect(counter.data).toBe(0);
+  counter.data = 1;
+  expect(counter.data).toBe(0);
+  counter.data = 2;
+  expect(counter.data).toBe(0);
+  counter.data = 3;
+  expect(counter.data).toBe(0);
+  await delay(15);
+  expect(counter.data).toBe(3);
 });

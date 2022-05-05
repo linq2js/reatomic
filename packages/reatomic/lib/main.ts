@@ -30,14 +30,20 @@ export type EffectResult<T> = T extends Promise<infer R> ? R : T;
 export interface Options {
   load?: () => { data: any } | undefined;
   save?: (data: any) => void;
+  updateEffect?: (() => Effect) | Effect;
 }
 
+export interface AtomWithReducerOptions extends Omit<Options, "updateEffect"> {}
+
+export interface AtomWithMutatonOptions
+  extends Omit<Options, "load" | "save" | "updateEffect"> {}
+
 export interface Effect<T = any> {
-  effect(context: Context): { call(): T; deps?: any[]; transient?: boolean };
+  effect(context: Context): T;
 }
 
 export interface Action<T extends string = string> {
-  type: T;
+  type?: T;
 }
 
 export interface AnyAction extends Action {
@@ -91,32 +97,33 @@ export interface Atom<T = any> {
   listen(listener: VoidFunction): VoidFunction;
 }
 
-interface CallableAtom<T = any, A extends Action = AnyAction>
-  extends Omit<Atom<T>, "set" | "data"> {
+/**
+ * Atom for reducer mode
+ */
+export type AtomWithReducer<T = any, A extends Action = AnyAction> = Omit<
+  Atom<T>,
+  "set" | "data"
+> & {
   readonly data: T;
   /**
    * call an action, this method works like redux store's dispatch method
    * @param action
    */
-  call(action: A["type"]): this;
+  call(action: A["type"]): void;
   /**
    * call an action, this method works like redux store's dispatch method
    * @param action
    */
-  call(action: A): this;
-}
-
-/**
- * Atom for reducer mode
- */
-export interface AtomWithReducer<T = any, A extends Action = AnyAction>
-  extends CallableAtom<T, A> {}
+  call(action: A): void;
+};
 
 /**
  * Atom for mutation mode
  */
-export interface AtomWithMutation<T = any, A extends Action = AnyAction>
-  extends Omit<CallableAtom<T, A>, "reset"> {}
+export type AtomWithMutation<T = any, P extends any[] = never, R = any> = Omit<
+  Atom<T>,
+  "set" | "data"
+> & { readonly data: T; call(...args: P): R | undefined };
 
 type InternalAtom = AtomWithReducer &
   Atom & {
@@ -142,6 +149,17 @@ export interface Create {
   <T>(data: T, options?: Options): Atom<T>;
 
   /**
+   * create an atom and indicate initFn is mutation, and disable tracking
+   */
+  <T = any, TMutation extends (...args: any[]) => any = any>(
+    mutation: TMutation,
+    type: typeof TYPE_MUTATION,
+    options?: AtomWithMutatonOptions
+  ): TMutation extends (context: Context, ...args: infer P) => infer R
+    ? AtomWithMutation<T, P, R>
+    : never;
+
+  /**
    * create an atom and indicate initFn is reducer, and disable tracking
    */
   <T = any, A extends Action = AnyAction>(
@@ -149,21 +167,7 @@ export interface Create {
     type: Type,
     options?: AtomWithReducerOptions
   ): AtomWithReducer<T, A>;
-
-  /**
-   * create an atom and indicate initFn is mutation, and disable tracking
-   */
-  <T = any, A extends Action = AnyAction>(
-    mutation: Mutation<T, A>,
-    type: typeof TYPE_MUTATION,
-    options?: AtomWithMutatonOptions
-  ): AtomWithMutation<T, A>;
 }
-
-export interface AtomWithReducerOptions extends Options {}
-
-export interface AtomWithMutatonOptions
-  extends Omit<Options, "load" | "save"> {}
 
 export interface Context {
   /**
@@ -174,6 +178,8 @@ export interface Context {
   readonly data?: any;
 
   readonly refs: any;
+
+  readonly id: any;
 
   isCancelled(): boolean;
 
@@ -199,11 +205,6 @@ export interface Context {
 export type Reducer<T = any, A extends Action = AnyAction> = (
   context: Context,
   prev: T,
-  action: A
-) => T;
-
-export type Mutation<T = any, A extends Action = AnyAction> = (
-  context: Context,
   action: A
 ) => T;
 
@@ -252,6 +253,7 @@ const createContext = <T>(
   const cancelListeners: VoidFunction[] = [];
 
   const context: Context = {
+    id: {},
     refs,
     get signal() {
       if (!ac) {
@@ -283,14 +285,10 @@ const createContext = <T>(
 
       // is effect
       if (args[0]?.effect) {
-        const effect: Effect = args[0];
-        const configs = effect.effect(context);
-        [deps, factory, transient] = [
-          configs.deps ?? [],
-          configs.call,
-          configs.transient ?? false,
-        ];
-      } else if (isFunc(args[0])) {
+        return (args[0] as Effect).effect(context);
+      }
+
+      if (isFunc(args[0])) {
         deps = [];
         [factory, transient] = args;
       } else {
@@ -348,8 +346,10 @@ const notify = (
  * @returns
  */
 export const atom: Create = (initial?: any, ...args: any[]): any => {
+  type Phase = "init" | "update";
+
   const listeners = new Set<VoidFunction>();
-  const cache: Cache[] = [];
+  const cache: Record<string, Cache[]> = {};
   const fn: Function | false = isFunc(initial) && initial;
   const refs: any = {};
   let data: any = fn ? undefined : initial;
@@ -359,7 +359,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
   let lastPromise: Promise<void> | undefined;
   let atom: InternalAtom;
   let lastContext: Context | undefined;
-  let lastAction: Action | undefined;
+  let lastAction: any;
   let loadedData: any;
   let type: Type | undefined;
   let options: Options | undefined;
@@ -371,12 +371,13 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     options = args[0];
   }
 
-  const { load, save } = options ?? {};
-
+  const { load, save, updateEffect } = options ?? {};
+  const defaultAction = type === "mutation" ? undefined : UPDATE_ACTION;
   const update = (
     computeFn: Function | false = fn,
-    hydrating = false,
-    action = lastAction ?? UPDATE_ACTION
+    phase: Phase = "update",
+    action = lastAction ?? defaultAction,
+    context?: Context
   ) => {
     const prevListeners = [...listeners];
     loading = false;
@@ -388,27 +389,46 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
         // disable tracking for custom fn type
         type ? undefined : handleDependencyChange,
         () => {
+          const token = changeToken;
           try {
             // cancel previous context if any
             lastContext?.cancel();
-            const token = changeToken;
-            lastContext = createContext(
-              refs,
-              cache,
-              data,
-              changeToken,
-              () => token !== changeToken
-            );
+
+            if (!context) {
+              const at = action?.type ?? "";
+              context = createContext(
+                refs,
+                // organize cache by action name
+                cache[at] ?? (cache[at] = []),
+                data,
+                token,
+                () => token !== changeToken
+              );
+            }
+
+            lastContext = context;
+            // trigger update effect if any
+            // we only trigger the effect in update phase
+
+            if (phase === "update" && updateEffect) {
+              lastContext.use(
+                typeof updateEffect === "function"
+                  ? updateEffect()
+                  : updateEffect
+              );
+            }
+
             const result =
               type === TYPE_MUTATION
                 ? computeFn(lastContext, action as Action)
                 : computeFn(lastContext, data, action as Action);
+
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
             if (type === TYPE_MUTATION || result !== data) {
               data = result;
               changeToken = {};
-              if (!hydrating) save?.(data);
+              if (phase === "update") save?.(data);
             }
           } catch (e) {
             const ex = e;
@@ -419,11 +439,10 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
               }
               loading = true;
               lastPromise = ex;
-              const token = changeToken;
               ex.finally(() => {
                 // skip refresh if the data has been changed since last time
                 if (token !== changeToken) return;
-                update();
+                update(computeFn, phase, action, context);
               });
             } else {
               error = ex;
@@ -437,14 +456,14 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
 
   handleDependencyChange = () => update();
 
-  const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
-    if (!hydrating && type) {
+  const set = (updateFn: UpdateFn | UpdateFn[], phase: Phase = "update") => {
+    if (phase === "update" && type) {
       throw new Error(
         "Cannot update atom data directly if the initFn type is reducer/mutation. Use call(action) method instead"
       );
     }
     const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
-    update(() => fns.reduce((d, f) => f(d), data), hydrating);
+    update(() => fns.reduce((d, f) => f(d), data), phase);
   };
 
   const addDependant = () => currentListener && listeners.add(currentListener);
@@ -480,7 +499,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     call(action) {
       if (typeof action === "string") action = { type: action };
       lastAction = action;
-      update(initial, false, action);
+      update(initial, "update", action);
       return atom;
     },
     set(...args: any[]) {
@@ -554,7 +573,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
         if (type === TYPE_REDUCER) {
           // reset data to hydrated data
           data = loadedData;
-          update(undefined, false, UPDATE_ACTION);
+          update(undefined, "init", UPDATE_ACTION);
         } else if (!type) {
           update();
         }
@@ -574,13 +593,13 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
         // save loaded data for later use
         loadedData = loaded.data;
         // update data with loadedData
-        set(() => loadedData, true);
+        set(() => loadedData, "init");
       } else {
         // init data as normal way
         update();
       }
     } else {
-      update();
+      update(undefined, "init");
     }
   }
 
