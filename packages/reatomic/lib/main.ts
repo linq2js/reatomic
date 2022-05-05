@@ -33,7 +33,7 @@ export interface Options {
 }
 
 export interface Effect<T = any> {
-  effect(context: Context): { call(): T; deps?: any[] };
+  effect(context: Context): { call(): T; deps?: any[]; transient?: boolean };
 }
 
 export interface Action<T extends string = string> {
@@ -123,7 +123,7 @@ type InternalAtom = AtomWithReducer &
     readonly $$promise: Promise<void> | undefined;
   };
 
-type Cache = { value: any; error?: any; deps: any[] };
+type Cache = { value: any; token: any; error?: any; deps: any[] };
 
 export interface DefaultExport {
   /**
@@ -173,8 +173,6 @@ export interface Context {
 
   readonly data?: any;
 
-  readonly token: {};
-
   isCancelled(): boolean;
 
   isStale(): boolean;
@@ -183,11 +181,11 @@ export interface Context {
 
   use<T>(atom: Atom<T>): EffectResult<T>;
 
-  use<T>(factory: () => T): EffectResult<T>;
+  use<T>(factory: () => T, transient?: boolean): EffectResult<T>;
 
   use<T, P extends any[]>(deps: P, factory: (...args: P) => T): EffectResult<T>;
 
-  use<T>(deps: any[], factory: () => T): EffectResult<T>;
+  use<T>(deps: any[], factory: () => T, transient?: boolean): EffectResult<T>;
 
   cancel(): void;
 }
@@ -231,7 +229,6 @@ const createContext = <T>(
   let cancelled = false;
 
   const context: Context = {
-    token,
     get signal() {
       if (!ac) {
         if (!isACSupported) return undefined;
@@ -257,17 +254,18 @@ const createContext = <T>(
       // is effect
       if (args[0]?.effect) {
         const effect: Effect = args[0];
-        const { call, deps = [] } = effect.effect(context);
-        return context.use(deps, call);
+        const { call, deps = [], transient } = effect.effect(context);
+        return context.use(deps, call, transient);
       }
 
       let deps: any[];
       let factory: Function;
+      let transient: boolean;
       if (isFunc(args[0])) {
         deps = [];
-        [factory] = args;
+        [factory, transient] = args;
       } else {
-        [deps, factory] = args;
+        [deps, factory, transient] = args;
       }
 
       let m = cache[hookIndex];
@@ -275,11 +273,13 @@ const createContext = <T>(
         const shouldUpdate =
           !m ||
           m.deps.length !== deps.length ||
-          m.deps.some((x, i) => x !== deps[i]);
+          m.deps.some((x, i) => x !== deps[i]) ||
+          // data is changed
+          (transient && m.token !== token);
 
         if (shouldUpdate) {
           const value = factory(...deps);
-          cache[hookIndex] = m = { value, deps };
+          cache[hookIndex] = m = { value, deps, token };
           // handle async
           if (isPromise(value)) {
             m.value = undefined;
