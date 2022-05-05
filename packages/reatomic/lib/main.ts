@@ -1,25 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 
-const BIND_MODE_ALL = "all";
-const BIND_MODE_SUSPENSE = "suspense";
-const BIND_MODE_ERROR_BOUNDARY = "errorBoundary";
-const BIND_MODE_NONE = "none";
+const MODE_ALL = "all";
+const MODE_SUSPENSE = "suspense";
+const MODE_ERROR_BOUNDARY = "errorBoundary";
+const MODE_NONE = "none";
 const ERROR_RESULT_IS_PROMISE_OBJECT = "The result cannot be promise object";
 
 export type UpdateFn<T = any> = (prev: T) => T;
 
-export type BindMode =
-  | typeof BIND_MODE_ALL
-  | typeof BIND_MODE_SUSPENSE
-  | typeof BIND_MODE_ERROR_BOUNDARY
-  | typeof BIND_MODE_NONE;
+export type Mode =
+  | typeof MODE_ALL
+  | typeof MODE_SUSPENSE
+  | typeof MODE_ERROR_BOUNDARY
+  | typeof MODE_NONE;
 
-export const EXECUTE_MODE_REDUCER = "reducer";
-export const EXECUTE_MODE_MUTATION = "mutation";
+export const TYPE_REDUCER = "reducer";
+export const TYPE_MUTATION = "mutation";
 
-export type ExecuteMode =
-  | typeof EXECUTE_MODE_REDUCER
-  | typeof EXECUTE_MODE_MUTATION;
+export type Type = typeof TYPE_REDUCER | typeof TYPE_MUTATION;
 
 /**
  * Use this function to let reatomic knows when the host component should update.
@@ -84,7 +82,7 @@ export interface Atom<T = any> {
   /**
    * bind the atom to the current react component
    */
-  use(mode?: BindMode, shouldUpdate?: ShouldUpdateFn<T>): T;
+  use(mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
   use(shouldUpdate: ShouldUpdateFn<T>): T;
   /**
    * listen atom data change event
@@ -144,26 +142,28 @@ export interface DefaultExport {
   <T>(data: T, options?: Options): Atom<T>;
 
   /**
-   * create an atom and enable reducer mode, and disable tracking
+   * create an atom and indicate initFn is reducer, and disable tracking
    */
   <T = any, A extends Action = AnyAction>(
     reducer: Reducer<T, A>,
-    options: AtomWithReducerOptions | typeof EXECUTE_MODE_REDUCER
+    type: Type,
+    options?: AtomWithReducerOptions
   ): AtomWithReducer<T, A>;
 
+  /**
+   * create an atom and indicate initFn is mutation, and disable tracking
+   */
   <T = any, A extends Action = AnyAction>(
     mutation: Mutation<T, A>,
-    options: AtomWithMutatonOptions | typeof EXECUTE_MODE_MUTATION
+    type: typeof TYPE_MUTATION,
+    options?: AtomWithMutatonOptions
   ): AtomWithMutation<T, A>;
 }
 
-export interface AtomWithReducerOptions extends Options {
-  mode: typeof EXECUTE_MODE_REDUCER;
-}
+export interface AtomWithReducerOptions extends Options {}
 
-export interface AtomWithMutatonOptions extends Omit<Options, "load" | "save"> {
-  mode: typeof EXECUTE_MODE_MUTATION;
-}
+export interface AtomWithMutatonOptions
+  extends Omit<Options, "load" | "save"> {}
 
 export interface Context {
   /**
@@ -314,10 +314,7 @@ const notify = (
  * @param initial
  * @returns
  */
-const create: DefaultExport = (
-  initial?: any,
-  options?: (Options & { mode?: ExecuteMode }) | ExecuteMode
-): any => {
+const create: DefaultExport = (initial?: any, ...args: any[]): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
   const fn: Function | false = isFunc(initial) && initial;
@@ -330,15 +327,16 @@ const create: DefaultExport = (
   let lastContext: Context | undefined;
   let lastAction: Action | undefined;
   let loadedData: any;
-  let mode: ExecuteMode | undefined;
-  let load: Function | undefined;
-  let save: Function | undefined;
+  let type: Type | undefined;
+  let options: Options | undefined;
 
-  if (typeof options === "string") {
-    mode = options;
-  } else if (options) {
-    [mode, save, load] = [options.mode, options.save, options.load];
+  if (typeof args[0] === "string") {
+    [type, options] = [args[0] as Type, args[1]];
+  } else {
+    options = args[0];
   }
+
+  const { load, save } = options ?? {};
 
   const update = (
     computeFn: Function | false = fn,
@@ -352,8 +350,8 @@ const create: DefaultExport = (
     listeners.clear();
     if (computeFn) {
       track(
-        // disable tracking for custom execute mode
-        mode ? undefined : update,
+        // disable tracking for custom fn type
+        type ? undefined : update,
         () => {
           try {
             lastContext?.cancel();
@@ -365,19 +363,15 @@ const create: DefaultExport = (
               () => token !== changeToken
             );
             const result =
-              mode === EXECUTE_MODE_MUTATION
+              type === TYPE_MUTATION
                 ? computeFn(lastContext, action as Action)
                 : computeFn(lastContext, data, action as Action);
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
-            if (mode === EXECUTE_MODE_MUTATION) {
+            if (type === TYPE_MUTATION || result !== data) {
               data = result;
-            } else {
-              if (result !== data) {
-                data = result;
-                changeToken = {};
-                if (!hydrating) save?.(data);
-              }
+              changeToken = {};
+              if (!hydrating) save?.(data);
             }
           } catch (e) {
             // handle promise object that is thrown by use()
@@ -401,9 +395,9 @@ const create: DefaultExport = (
   };
 
   const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
-    if (!hydrating && mode) {
+    if (!hydrating && type) {
       throw new Error(
-        "Cannot update atom data in reducer/mutation mode directly. Use call(action) method instead"
+        "Cannot update atom data directly if the initFn type is reducer/mutation. Use call(action) method instead"
       );
     }
     const fns = typeof updateFn === "function" ? [updateFn] : updateFn;
@@ -454,13 +448,13 @@ const create: DefaultExport = (
       const rerender = useState<any>()[1];
       const activeRef = useRef(true);
       const shouldUpdateRef = useRef<ShouldUpdateFn>();
-      let mode: BindMode;
+      let mode: Mode;
 
       if (isFunc(args[0])) {
-        mode = BIND_MODE_ALL;
+        mode = MODE_ALL;
         [shouldUpdateRef.current] = args;
       } else {
-        [mode = BIND_MODE_ALL, shouldUpdateRef.current] = args;
+        [mode = MODE_ALL, shouldUpdateRef.current] = args;
       }
 
       activeRef.current = true;
@@ -491,12 +485,9 @@ const create: DefaultExport = (
         });
       }, [rerender]);
       if (mode) {
-        if (loading && (mode === BIND_MODE_SUSPENSE || mode === BIND_MODE_ALL))
+        if (loading && (mode === MODE_SUSPENSE || mode === MODE_ALL))
           throw lastPromise;
-        if (
-          error &&
-          (mode === BIND_MODE_ERROR_BOUNDARY || mode === BIND_MODE_ALL)
-        )
+        if (error && (mode === MODE_ERROR_BOUNDARY || mode === MODE_ALL))
           throw error;
       }
       return data;
@@ -517,11 +508,11 @@ const create: DefaultExport = (
     },
     reset() {
       if (fn) {
-        if (mode === EXECUTE_MODE_REDUCER) {
+        if (type === TYPE_REDUCER) {
           // reset data to hydrated data
           data = loadedData;
           update(undefined, false, UPDATE_ACTION);
-        } else if (!mode) {
+        } else if (!type) {
           update();
         }
         save?.(data);
@@ -532,7 +523,7 @@ const create: DefaultExport = (
   };
 
   // start initializing phase
-  if (mode !== EXECUTE_MODE_MUTATION) {
+  if (type !== TYPE_MUTATION) {
     // load data from external source
     if (load) {
       const loaded = load();
@@ -549,6 +540,9 @@ const create: DefaultExport = (
       update();
     }
   }
+
+  // unsed var
+  options;
 
   return atom;
 };
