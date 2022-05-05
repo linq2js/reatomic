@@ -173,6 +173,8 @@ export interface Context {
 
   readonly data?: any;
 
+  readonly refs: any;
+
   isCancelled(): boolean;
 
   isStale(): boolean;
@@ -187,7 +189,11 @@ export interface Context {
 
   use<T>(deps: any[], factory: () => T, transient?: boolean): EffectResult<T>;
 
+  /**
+   * cancel AbortController if any
+   */
   cancel(): void;
+  onCancel(listener: VoidFunction): this;
 }
 
 export type Reducer<T = any, A extends Action = AnyAction> = (
@@ -203,8 +209,23 @@ export type Mutation<T = any, A extends Action = AnyAction> = (
 
 export type ComputeFn<T = any> = (context: Context) => T;
 
+/**
+ * check a value is whether function or not
+ * @param value
+ * @returns
+ */
 const isFunc = (value: any): value is Function => typeof value === "function";
+
+const isCancellable = (value: any): value is { cancel(): void } =>
+  isFunc(value?.cancel);
+
+/**
+ * check a value is whether promise or not
+ * @param value
+ * @returns
+ */
 const isPromise = (value: any): value is Promise<any> => isFunc(value?.then);
+
 let currentListener: VoidFunction | undefined;
 
 const track = (updateFn: VoidFunction | undefined, f: Function) => {
@@ -219,6 +240,7 @@ const track = (updateFn: VoidFunction | undefined, f: Function) => {
 
 const isACSupported = typeof AbortController !== "undefined";
 const createContext = <T>(
+  refs: any,
   cache: Cache[],
   data: T,
   token: {},
@@ -227,8 +249,10 @@ const createContext = <T>(
   let hookIndex = 0;
   let ac: AbortController | undefined;
   let cancelled = false;
+  const cancelListeners: VoidFunction[] = [];
 
   const context: Context = {
+    refs,
     get signal() {
       if (!ac) {
         if (!isACSupported) return undefined;
@@ -240,8 +264,9 @@ const createContext = <T>(
     isStale: () => cancelled || isStale(),
     cancel() {
       if (cancelled) return;
-      ac?.abort();
       cancelled = true;
+      ac?.abort();
+      notify(cancelListeners);
     },
     use(...args: any[]) {
       // is atom
@@ -251,17 +276,21 @@ const createContext = <T>(
         if (atom.error) throw atom.error;
         return atom.data;
       }
-      // is effect
-      if (args[0]?.effect) {
-        const effect: Effect = args[0];
-        const { call, deps = [], transient } = effect.effect(context);
-        return context.use(deps, call, transient);
-      }
 
       let deps: any[];
       let factory: Function;
       let transient: boolean;
-      if (isFunc(args[0])) {
+
+      // is effect
+      if (args[0]?.effect) {
+        const effect: Effect = args[0];
+        const configs = effect.effect(context);
+        [deps, factory, transient] = [
+          configs.deps ?? [],
+          configs.call,
+          configs.transient ?? false,
+        ];
+      } else if (isFunc(args[0])) {
         deps = [];
         [factory, transient] = args;
       } else {
@@ -296,6 +325,10 @@ const createContext = <T>(
       hookIndex++;
       return m.value;
     },
+    onCancel(listener: VoidFunction) {
+      cancelListeners.push(listener);
+      return this;
+    },
     data,
   };
 
@@ -318,6 +351,7 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
   const fn: Function | false = isFunc(initial) && initial;
+  const refs: any = {};
   let data: any = fn ? undefined : initial;
   let changeToken = {};
   let loading = false;
@@ -329,6 +363,7 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
   let loadedData: any;
   let type: Type | undefined;
   let options: Options | undefined;
+  let handleDependencyChange: VoidFunction;
 
   if (typeof args[0] === "string") {
     [type, options] = [args[0] as Type, args[1]];
@@ -351,12 +386,14 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
     if (computeFn) {
       track(
         // disable tracking for custom fn type
-        type ? undefined : update,
+        type ? undefined : handleDependencyChange,
         () => {
           try {
+            // cancel previous context if any
             lastContext?.cancel();
             const token = changeToken;
             lastContext = createContext(
+              refs,
               cache,
               data,
               changeToken,
@@ -374,18 +411,22 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
               if (!hydrating) save?.(data);
             }
           } catch (e) {
+            const ex = e;
             // handle promise object that is thrown by use()
-            if (isPromise(e)) {
+            if (isPromise(ex)) {
+              if (isCancellable(ex)) {
+                lastContext?.onCancel(() => ex.cancel());
+              }
               loading = true;
-              lastPromise = e;
+              lastPromise = ex;
               const token = changeToken;
-              e.finally(() => {
+              ex.finally(() => {
                 // skip refresh if the data has been changed since last time
                 if (token !== changeToken) return;
                 update();
               });
             } else {
-              error = e;
+              error = ex;
             }
           }
         }
@@ -393,6 +434,8 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
     }
     notify(prevListeners);
   };
+
+  handleDependencyChange = () => update();
 
   const set = (updateFn: UpdateFn | UpdateFn[], hydrating = false) => {
     if (!hydrating && type) {

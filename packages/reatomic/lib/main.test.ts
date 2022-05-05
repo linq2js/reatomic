@@ -1,4 +1,5 @@
 import atom, { Action } from "./main";
+import { debounce } from "./concurrency";
 
 const delay = <T = unknown>(ms: number = 0, value?: T) =>
   new Promise<T>((resolve) => setTimeout(resolve, ms, value));
@@ -100,4 +101,17 @@ test("mutation", () => {
   expect(payload).toBeUndefined();
   updateUserProfile.call({ type: "update", payload: 1 });
   expect(payload).toBe(1);
+});
+
+test("debounce", async () => {
+  const counter = atom(({ use }) => {
+    use(debounce(5));
+    return 1;
+  }, "mutation");
+  expect(counter.data).toBeUndefined();
+  counter.call({ type: "update" });
+  counter.call({ type: "update" });
+  counter.call({ type: "update" });
+  await delay(10);
+  expect(counter.data).toBe(1);
 });
