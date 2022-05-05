@@ -1,4 +1,4 @@
-import atom, { Action } from "./main";
+import { atom, Action } from "./main";
 import { debounce } from "./concurrency";
 
 const delay = <T = unknown>(ms: number = 0, value?: T) =>

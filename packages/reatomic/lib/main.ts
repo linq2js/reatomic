@@ -125,7 +125,7 @@ type InternalAtom = AtomWithReducer &
 
 type Cache = { value: any; token: any; error?: any; deps: any[] };
 
-export interface DefaultExport {
+export interface Create {
   /**
    * create an atom that can store any data, the atom's initial data is undefined
    */
@@ -347,7 +347,7 @@ const notify = (
  * @param initial
  * @returns
  */
-const create: DefaultExport = (initial?: any, ...args: any[]): any => {
+export const atom: Create = (initial?: any, ...args: any[]): any => {
   const listeners = new Set<VoidFunction>();
   const cache: Cache[] = [];
   const fn: Function | false = isFunc(initial) && initial;
@@ -589,5 +589,3 @@ const create: DefaultExport = (initial?: any, ...args: any[]): any => {
 
   return atom;
 };
-
-export default create;
