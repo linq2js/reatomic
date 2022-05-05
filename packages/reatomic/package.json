@@ -13,13 +13,10 @@
   "directories": {
     "lib": "lib"
   },
-  "exports": {
-    ".": "./dist/main.js",
-    "./concurrency": "./dist/concurrency"
-  },
   "files": [
     "lib",
-    "dist/tsc"
+    "dist/tsc",
+    "concurrency"
   ],
   "keywords": [
     "redux",
