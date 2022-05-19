@@ -181,6 +181,8 @@ export interface Context {
 
   readonly id: any;
 
+  reset(): void;
+
   isCancelled(): boolean;
 
   isStale(): boolean;
@@ -262,6 +264,7 @@ const createContext = <T>(
       }
       return ac.signal;
     },
+    reset() {},
     isCancelled: () => cancelled,
     isStale: () => cancelled || isStale(),
     cancel() {
@@ -310,7 +313,7 @@ const createContext = <T>(
           // handle async
           if (isPromise(value)) {
             m.value = undefined;
-            // refresh function will handle this
+            // update function will handle this
             throw new Promise<void>((resolve) => {
               const onSuccess = (r: any) => (m.value = r);
               const onError = (e: any) => (m.error = e);
@@ -372,7 +375,8 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
   }
 
   const { load, save, updateEffect } = options ?? {};
-  const defaultAction = type === "mutation" ? undefined : UPDATE_ACTION;
+  const isMutation = type === TYPE_MUTATION;
+  const defaultAction = isMutation ? undefined : UPDATE_ACTION;
   const update = (
     computeFn: Function | false = fn,
     phase: Phase = "update",
@@ -390,42 +394,39 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
         type ? undefined : handleDependencyChange,
         () => {
           const token = changeToken;
+
+          // cancel previous context if any
+          lastContext?.cancel();
+
+          if (!context) {
+            const at = action?.type ?? "";
+            context = createContext(
+              refs,
+              // organize cache by action name
+              cache[at] ?? (cache[at] = []),
+              data,
+              token,
+              () => token !== changeToken
+            );
+          }
+          lastContext = context;
+
           try {
-            // cancel previous context if any
-            lastContext?.cancel();
-
-            if (!context) {
-              const at = action?.type ?? "";
-              context = createContext(
-                refs,
-                // organize cache by action name
-                cache[at] ?? (cache[at] = []),
-                data,
-                token,
-                () => token !== changeToken
-              );
-            }
-
-            lastContext = context;
             // trigger update effect if any
             // we only trigger the effect in update phase
-
             if (phase === "update" && updateEffect) {
               lastContext.use(
-                typeof updateEffect === "function"
-                  ? updateEffect()
-                  : updateEffect
+                isFunc(updateEffect) ? updateEffect() : updateEffect
               );
             }
 
-            const result =
-              type === TYPE_MUTATION
-                ? computeFn(lastContext, action as Action)
-                : computeFn(lastContext, data, action as Action);
+            const result = isMutation
+              ? computeFn(lastContext, action)
+              : computeFn(lastContext, data, action);
 
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
-            if (type === TYPE_MUTATION || result !== data) {
+            if (isMutation || result !== data) {
               data = result;
               changeToken = {};
               if (phase === "update") save?.(data);
@@ -438,15 +439,20 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
                 lastContext?.onCancel(() => ex.cancel());
               }
               loading = true;
-              lastPromise = ex;
+              // make new promise that will be delayed until next update finished
+              lastPromise = new Promise((resolve, reject) =>
+                ex.then(() => setTimeout(resolve), reject)
+              );
               ex.finally(() => {
-                // skip refresh if the data has been changed since last time
+                // skip update if the data has been changed since last time
                 if (token !== changeToken) return;
                 update(computeFn, phase, action, context);
               });
             } else {
               error = ex;
             }
+          } finally {
+            context.reset = atom.reset;
           }
         }
       );

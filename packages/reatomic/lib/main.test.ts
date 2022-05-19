@@ -160,3 +160,19 @@ test("updateEffect", async () => {
   await delay(15);
   expect(counter.data).toBe(3);
 });
+
+test("should not call init function if data has been hydrated", async () => {
+  let called = false;
+  const count = atom(
+    (x) => {
+      called = true;
+      return x.use(async () => {
+        await delay(20);
+        return 1;
+      });
+    },
+    { load: () => ({ data: 2 }) }
+  );
+  expect(called).toBeFalsy();
+  expect(count.data).toBe(2);
+});

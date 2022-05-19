@@ -19,11 +19,11 @@ yarn add reatomic
 ## Features
 
 1. Tiny size: ~1K GZipped
-2. Extreme fast
-3. Fully Typescript supported
-4. Asynchronous data supported
-5. State dependencies supported
-6. Suspense & Error Boundary supported
+1. Extreme fast
+1. Fully Typescript supported
+1. Asynchronous data supported
+1. State dependencies supported
+1. Suspense & Error Boundary supported
 
 ## Live Demo
 
