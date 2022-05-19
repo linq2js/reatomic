@@ -442,10 +442,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
               }
               loading = true;
               // make new promise that will be delayed until next update finished
-              lastPromise = new Promise((resolve, reject) => {
-                lastResolve = resolve;
-                ex.catch(reject);
-              });
+              lastPromise = ex;
               ex.finally(() => {
                 // skip update if the data has been changed since last time
                 if (token !== changeToken) return;
