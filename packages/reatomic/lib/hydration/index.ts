@@ -5,7 +5,7 @@ export interface HydrateOptions {
 }
 
 export const hydrate = ({ data, onLoad, onSave }: HydrateOptions = {}) => {
-  let hydratedData = new Map<unknown, unknown>(data ?? []);
+  let hydratedData = new Map<any, any>(data ?? []);
   let allDataReady: Promise<void> | undefined;
   let dataReadyResolve: VoidFunction | undefined;
   const pendingAtoms = new Set<unknown>();
