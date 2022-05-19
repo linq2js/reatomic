@@ -367,6 +367,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
   let type: Type | undefined;
   let options: Options | undefined;
   let handleDependencyChange: VoidFunction;
+  let lastResolve: VoidFunction | undefined;
 
   if (typeof args[0] === "string") {
     [type, options] = [args[0] as Type, args[1]];
@@ -431,6 +432,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
               changeToken = {};
               if (phase === "update") save?.(data);
             }
+            lastResolve?.();
           } catch (e) {
             const ex = e;
             // handle promise object that is thrown by use()
@@ -440,9 +442,10 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
               }
               loading = true;
               // make new promise that will be delayed until next update finished
-              lastPromise = new Promise((resolve, reject) =>
-                ex.then(() => setTimeout(resolve), reject)
-              );
+              lastPromise = new Promise((resolve, reject) => {
+                lastResolve = resolve;
+                ex.catch(reject);
+              });
               ex.finally(() => {
                 // skip update if the data has been changed since last time
                 if (token !== changeToken) return;
