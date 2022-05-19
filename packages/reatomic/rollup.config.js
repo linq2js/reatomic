@@ -19,4 +19,13 @@ export default [
     },
     plugins: [terser()],
   },
+  {
+    input: "./dist/tsc/hydration/index.js",
+    output: {
+      dir: "dist/hydration",
+      format: "cjs",
+      indent: false,
+    },
+    plugins: [terser()],
+  },
 ];

@@ -17,7 +17,9 @@
     "lib",
     "dist/tsc",
     "dist/concurrency",
-    "concurrency"
+    "dist/hydration",
+    "concurrency",
+    "hydration"
   ],
   "keywords": [
     "redux",
