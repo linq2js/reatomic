@@ -24,11 +24,11 @@ export const hydrate = ({ data, onLoad, onSave }: HydrateOptions = {}) => {
       return {
         load() {
           onLoad?.(key);
-          return hydratedData.get(key)?.[0];
+          return hydratedData.get(key);
         },
         save(data: any) {
           pendingAtoms.delete(key);
-          hydratedData.set(key, [data]);
+          hydratedData.set(key, { data });
           if (!pendingAtoms.size) {
             dataReadyResolve?.();
           }
