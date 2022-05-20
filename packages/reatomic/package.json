@@ -1,6 +1,6 @@
 {
   "name": "reatomic",
-  "version": "0.0.32",
+  "version": "0.0.33",
   "description": "Minimal React state management",
   "author": "linq2js <linqtojs@gmail.com>",
   "repository": {
