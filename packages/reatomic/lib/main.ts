@@ -50,7 +50,20 @@ export interface AnyAction extends Action {
   [key: string]: any;
 }
 
-export interface Atom<T = any> {
+export interface Listenable<T> {
+  /**
+   * bind the atom to the current react component
+   */
+  use(mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
+  use(shouldUpdate: ShouldUpdateFn<T>): T;
+  /**
+   * listen atom data change event
+   * @param listener
+   */
+  listen(listener: VoidFunction): VoidFunction;
+}
+
+export interface Atom<T = any> extends Listenable<T> {
   readonly loading: boolean;
   /**
    * get data without tracking
@@ -85,16 +98,6 @@ export interface Atom<T = any> {
    */
   set(data: T): this;
   reset(): void;
-  /**
-   * bind the atom to the current react component
-   */
-  use(mode?: Mode, shouldUpdate?: ShouldUpdateFn<T>): T;
-  use(shouldUpdate: ShouldUpdateFn<T>): T;
-  /**
-   * listen atom data change event
-   * @param listener
-   */
-  listen(listener: VoidFunction): VoidFunction;
 }
 
 /**
@@ -352,7 +355,6 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
   type Phase = "init" | "update";
 
   const listeners = new Set<VoidFunction>();
-  const cache: Record<string, Cache[]> = {};
   const fn: Function | false = isFunc(initial) && initial;
   const refs: any = {};
   let data: any = fn ? undefined : initial;
@@ -368,6 +370,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
   let options: Options | undefined;
   let handleDependencyChange: VoidFunction;
   let lastResolve: VoidFunction | undefined;
+  let cache: Record<string, Cache[]> = {};
 
   if (typeof args[0] === "string") {
     [type, options] = [args[0] as Type, args[1]];
@@ -505,6 +508,10 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     call(action) {
       if (typeof action === "string") action = { type: action };
       lastAction = action;
+      // clean cache
+      if (type === TYPE_MUTATION || type === TYPE_REDUCER) {
+        cache = {};
+      }
       update(initial, "update", action);
       return atom;
     },
@@ -579,6 +586,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
         if (type === TYPE_REDUCER) {
           // reset data to hydrated data
           data = loadedData;
+          cache = {};
           update(undefined, "init", UPDATE_ACTION);
         } else if (!type) {
           update();

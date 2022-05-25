@@ -1,9 +1,10 @@
 {
   "compilerOptions": {
     "target": "ES2015",
-    "module": "ES2015",
+    "module": "CommonJS",
     "moduleResolution": "node",
     "declaration": true,
+    "disableSizeLimit": true,
     "strict": true,
     "noImplicitAny": true /* Raise error on expressions and declarations with an implied 'any' type. */,
     "strictNullChecks": true /* Enable strict null checks. */,
