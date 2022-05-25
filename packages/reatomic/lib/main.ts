@@ -430,6 +430,12 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
 
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
+            // clean cache after mutation/reducer because the effect will not be called for next time if the cache is not cleared
+            // the debounce/throttle effects do not work if we perform cache clearing before mutation/reducer call
+            if (type === TYPE_MUTATION || type === TYPE_REDUCER) {
+              cache = {};
+            }
+
             if (isMutation || result !== data) {
               data = result;
               changeToken = {};
@@ -508,10 +514,6 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     call(action) {
       if (typeof action === "string") action = { type: action };
       lastAction = action;
-      // clean cache
-      if (type === TYPE_MUTATION || type === TYPE_REDUCER) {
-        cache = {};
-      }
       update(initial, "update", action);
       return atom;
     },
