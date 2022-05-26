@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  createElement,
+  FC,
+  ReactNode,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 const MODE_ALL = "all";
 const MODE_SUSPENSE = "suspense";
@@ -31,6 +39,7 @@ export interface Options {
   load?: () => { data: any } | undefined;
   save?: (data: any) => void;
   updateEffect?: (() => Effect) | Effect;
+  preload?: boolean;
 }
 
 export interface AtomWithReducerOptions extends Omit<Options, "updateEffect"> {}
@@ -50,7 +59,7 @@ export interface AnyAction extends Action {
   [key: string]: any;
 }
 
-export interface Listenable<T> {
+export interface Listenable<T = any> {
   /**
    * bind the atom to the current react component
    */
@@ -98,6 +107,12 @@ export interface Atom<T = any> extends Listenable<T> {
    */
   set(data: T): this;
   reset(): void;
+  /**
+   * render an atom with specified options
+   * @param options
+   */
+  render(options?: RenderOptions<T>): ReactNode;
+  render(fn: (data: T) => ReactNode): ReactNode;
 }
 
 /**
@@ -171,6 +186,8 @@ export interface Create {
     options?: AtomWithReducerOptions
   ): AtomWithReducer<T, A>;
 }
+
+export type CacheStrategy = "transient" | "lifetime";
 
 export interface Context {
   /**
@@ -285,23 +302,25 @@ const createContext = <T>(
         return atom.data;
       }
 
-      let deps: any[];
+      let deps: any[] = [];
       let factory: Function;
       let transient: boolean;
 
-      // is effect
+      // use(effect)
       if (args[0]?.effect) {
         return (args[0] as Effect).effect(context);
       }
 
+      // use(fatory, transient)
       if (isFunc(args[0])) {
-        deps = [];
         [factory, transient] = args;
       } else {
+        // use(deps, fatory, transient)
         [deps, factory, transient] = args;
       }
 
       let m = cache[hookIndex];
+
       track(undefined, () => {
         const shouldUpdate =
           !m ||
@@ -316,7 +335,7 @@ const createContext = <T>(
           // handle async
           if (isPromise(value)) {
             m.value = undefined;
-            // update function will handle this
+            // update function will handle this promise
             throw new Promise<void>((resolve) => {
               const onSuccess = (r: any) => (m.value = r);
               const onError = (e: any) => (m.error = e);
@@ -340,6 +359,21 @@ const createContext = <T>(
 };
 
 const UPDATE_ACTION: Action = { type: "@@update" };
+
+const Render: FC<{
+  atom: Listenable;
+  render?: Function;
+  children?: ReactNode;
+}> = (props) => {
+  const data = props.atom.use();
+  if (props.render) return props.render(data);
+  return props.children ?? null;
+};
+
+export interface RenderOptions<T> {
+  render?: (data: T) => ReactNode;
+  fallback?: ReactNode;
+}
 
 const notify = (
   listeners: VoidFunction[] | Set<VoidFunction> | Map<any, VoidFunction>
@@ -378,7 +412,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     options = args[0];
   }
 
-  const { load, save, updateEffect } = options ?? {};
+  const { load, save, updateEffect, preload } = options ?? {};
   const isMutation = type === TYPE_MUTATION;
   const defaultAction = isMutation ? undefined : UPDATE_ACTION;
   const update = (
@@ -430,11 +464,6 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
 
             if (isPromise(result))
               throw new Error(ERROR_RESULT_IS_PROMISE_OBJECT);
-            // clean cache after mutation/reducer because the effect will not be called for next time if the cache is not cleared
-            // the debounce/throttle effects do not work if we perform cache clearing before mutation/reducer call
-            if (type === TYPE_MUTATION || type === TYPE_REDUCER) {
-              cache = {};
-            }
 
             if (isMutation || result !== data) {
               data = result;
@@ -520,6 +549,18 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     set(...args: any[]) {
       set(isFunc(args[0]) ? args : () => args[0]);
       return atom;
+    },
+    render: function (options) {
+      if (typeof options === "function") {
+        options = { render: options };
+      }
+
+      const element = createElement(Render, { atom, render: options?.render });
+
+      if (options?.fallback) {
+        return createElement(Suspense, { fallback: options.fallback }, element);
+      }
+      return element;
     },
     use: function Use(...args: any) {
       const rerender = useState<any>()[1];
