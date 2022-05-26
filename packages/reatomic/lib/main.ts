@@ -39,7 +39,6 @@ export interface Options {
   load?: () => { data: any } | undefined;
   save?: (data: any) => void;
   updateEffect?: (() => Effect) | Effect;
-  preload?: boolean;
 }
 
 export interface AtomWithReducerOptions extends Omit<Options, "updateEffect"> {}
@@ -412,7 +411,7 @@ export const atom: Create = (initial?: any, ...args: any[]): any => {
     options = args[0];
   }
 
-  const { load, save, updateEffect, preload } = options ?? {};
+  const { load, save, updateEffect } = options ?? {};
   const isMutation = type === TYPE_MUTATION;
   const defaultAction = isMutation ? undefined : UPDATE_ACTION;
   const update = (

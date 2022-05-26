@@ -48,5 +48,5 @@
     "ts-node": "ts-node",
     "build": "rimraf dist && tsc && rollup -c rollup.config.js && gzip-size ./dist/main.js"
   },
-  "gitHead": "9c6f79491a82d98e4d2b2d49eef3df43484940d1"
+  "gitHead": "f07604ab96e8e7c5787549a5cf6e5eb7042fa037"
 }
