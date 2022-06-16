@@ -39,6 +39,7 @@ export interface Options {
   load?: () => { data: any } | undefined;
   save?: (data: any) => void;
   updateEffect?: (() => Effect) | Effect;
+  // compare?: (a: any, b: any) => boolean
 }
 
 export interface AtomWithReducerOptions extends Omit<Options, "updateEffect"> {}
@@ -168,13 +169,16 @@ export interface Create {
   /**
    * create an atom and indicate initFn is mutation, and disable tracking
    */
-  <T = any, TMutation extends (...args: any[]) => any = any>(
+  <
+    R,
+    P extends any[],
+    TMutation extends (context: Context, ...args: P) => R,
+    T = any
+  >(
     mutation: TMutation,
     type: typeof TYPE_MUTATION,
     options?: AtomWithMutatonOptions
-  ): TMutation extends (context: Context, ...args: infer P) => infer R
-    ? AtomWithMutation<T, P, R>
-    : never;
+  ): AtomWithMutation<T, P, R>;
 
   /**
    * create an atom and indicate initFn is reducer, and disable tracking
